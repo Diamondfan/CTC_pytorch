@@ -49,9 +49,9 @@ def train(model, train_loader, loss_fn, optimizer, print_every=10):
 
 def dev(model):
     model.eval()
-    total_num_errs = 0
-    total_num_tokens = 0
-    decoder  = Decoder(space_idx = 0)
+    total_cer = 0
+    total_tokens = 0
+    decoder  = Decoder("_'abcdefghijklmnopqrstuvwxyz#", space_idx=0, blank_index=28)
     
     dev_dataset = myDataset(data_set='dev', n_mfcc=39)
     dev_loader = myDataLoader(dev_dataset, batch_size=8, shuffle=False,
@@ -69,9 +69,9 @@ def dev(model):
         probs = model(inputs)
         
         probs = probs.data.cpu()
-        total_num_errs += decoder.greedy_decoder(probs, input_sizes_list, targets, target_sizes)
-        total_num_tokens += sum(target_sizes)
-    acc = 1 - float(total_num_errs) / total_num_tokens
+        total_cer += decoder.phone_word_error(probs, input_sizes_list, targets, target_sizes)[0]
+        total_tokens += sum(target_sizes)
+    acc = 1 - float(total_cer) / total_tokens
     return acc*100
 
 def init_logger():
@@ -88,6 +88,7 @@ def init_logger():
     return logger
 
 def main(init_lr):
+    global logger 
     logger = init_logger()
     num_epoches = 50
     end_adjust_acc = 0.05
