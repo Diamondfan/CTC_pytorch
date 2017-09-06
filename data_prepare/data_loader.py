@@ -9,7 +9,7 @@ import sys
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 
-data_dir = '/home/fan/pytorch/CTC_SR/data_prepare/timit'
+data_dir = '/home/fan/pytorch/CTC_pytorch/data_prepare/timit'
 
 #Override the class of Dataset
 #Define my own dataset over timit used the feature extracted by kaldi
@@ -49,7 +49,7 @@ class myDataset(Dataset):
                 if label[i].lower() in self.char_map:
                     label_list.append(self.char_map[label[i].lower()])
                 if label[i] == ' ':
-                    label_list.append(0)
+                    label_list.append(1)
             label_dict[utt] = np.array(label_list)
         f.close()
         
@@ -82,7 +82,7 @@ class myDataset(Dataset):
             grp.create_dataset('data', data=np.array(mfcc_dict[utt]))
             grp.create_dataset('label', data=label_dict[utt])
         print("Saved the %s data to h5py file" % self.data_set)
-        print(self.__getitem__(1))
+        #print(self.__getitem__(1))
             
             
     def load_h5py(self, h5_file):
@@ -139,7 +139,7 @@ class myDataLoader(DataLoader):
 
 if __name__ == '__main__':
     dev_dataset = myDataset(data_set='dev', n_mfcc=39)
-    dev_loader = myDataLoader(dev_dataset, batch_size=32, shuffle=True, 
+    dev_loader = myDataLoader(dev_dataset, batch_size=8, shuffle=True, 
                      num_workers=4, pin_memory=False)
     i = 0
     for data in dev_loader:

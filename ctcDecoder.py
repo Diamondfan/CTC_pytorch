@@ -6,7 +6,7 @@
 import torch
 
 class Decoder(object):
-    def __init__(self, labels, space_idx = 0, blank_index = 28):
+    def __init__(self, labels, space_idx = 1, blank_index = 0):
         self.labels = labels
         self.int_to_char = dict([(i, c) for (i, c) in enumerate(labels)])
         self.space_idx = space_idx
@@ -74,7 +74,8 @@ class Decoder(object):
         strings = []
         for x in range(len(seq)):
             seq_len = sizes[x] if sizes is not None else len(seq[x])
-            strings.append(self._convert_to_string(seq[x], seq_len))
+            string = self._convert_to_string(seq[x], seq_len)
+            strings.append(string)
         return strings
 
     def _convert_to_string(self, seq, sizes):
@@ -159,5 +160,5 @@ class BeamDecoder_test(Decoder):
 
 if __name__ == '__main__':
     decoder = Decoder('abcde', 1, 2)
-    print(decoder.wer("I love you",'I Love me'))
+    print(decoder._convert_to_strings([[1,2,1,0,3],[1,2,1,1,1]]))
 

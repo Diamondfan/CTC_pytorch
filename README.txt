@@ -32,11 +32,23 @@ warpctc_pytorch install:
 	Baidu warp-ctc and binding with pytorch.
 	https://github.com/SeanNaren/warp-ctc/
 
+model part:
+	x RNN + Batch + 1 Linear can be defined with class CTC_RNN
+	output_size is 29, add space ' and blank with 26 characters
+
+training:
+	initial_lr = 0.001
+	adjust the learning rate if the dec acc is decreased
+	20 epoch for least training and total number of epoch is 50
+
+decoder:
+	greedy decoder
+	calculate the WER and CER by used the function of the class
+
 ToDo:
 data preparation for 863 corpus, little different from English one
-model testing
-training part
 test part
+beam search decode
 combine with LM
 
 
