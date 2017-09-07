@@ -53,6 +53,7 @@ class BatchRNN(nn.Module):
         if self.batch_norm is not None:
             x = self.batch_norm(x)
         x, _ = self.rnn(x)
+        self.rnn.flatten_parameters()
         return x
     
 
