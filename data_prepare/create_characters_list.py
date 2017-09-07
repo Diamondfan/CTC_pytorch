@@ -17,10 +17,10 @@ for label in f.readlines():
 f.close()
 char_list = list(set(char_list))
 f = open(char_file, 'w')
-f.write("SPACE 0\n")
 count = 1
 for x in char_list:
     if re.search('[a-z\']', x) != None:
         f.write(x+' '+str(count)+'\n')
         count += 1
+f.write("SPACE "+str(count)+"\n")
 f.close()

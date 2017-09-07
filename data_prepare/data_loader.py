@@ -49,7 +49,7 @@ class myDataset(Dataset):
                 if label[i].lower() in self.char_map:
                     label_list.append(self.char_map[label[i].lower()])
                 if label[i] == ' ':
-                    label_list.append(1)
+                    label_list.append(28)
             label_dict[utt] = np.array(label_list)
         f.close()
         
