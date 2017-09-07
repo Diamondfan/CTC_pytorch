@@ -57,11 +57,11 @@ def dev(model):
     model.eval()
     total_cer = 0
     total_tokens = 0
-    decoder  = Decoder("#_'acbedgfihkjmlonqpsrutwvyxz", space_idx=1, blank_index=0)
+    decoder  = Decoder("#'acbedgfihkjmlonqpsrutwvyxz_", space_idx=28, blank_index=0)
     
     dev_dataset = myDataset(data_set='dev', n_mfcc=39)
     dev_loader = myDataLoader(dev_dataset, batch_size=4, shuffle=False,
-                    num_workers=10, pin_memory=False)
+                    num_workers=4, pin_memory=False)
 
     for data in dev_loader:
         inputs, targets, input_sizes, input_sizes_list, target_sizes =data
@@ -101,17 +101,16 @@ def main(init_lr):
     params['rnn_input_size'] = 39
     params['rnn_hidden_size'] = 256
     params['rnn_layers'] = 5
-    params['rnn_type'] = nn.LSTM
+    params['rnn_type'] = nn.GRU
     params['num_class'] = 28
     params['bidirectional'] = True
     params['batch_norm'] = True
 
-    params['num_epoches'] = 50
-    params['least_train_epoch'] = 30
+    params['num_epoches'] = 40
+    params['least_train_epoch'] = 15
     end_adjust_acc = 0.05
-    start_adjust_acc = 0.25
     params['decay'] = 0.1
-    decay = 0.1
+    decay = 0.5
     count = 0
     params['learning_rate'] = init_lr
     params['batch_size'] = 4
@@ -144,46 +143,30 @@ def main(init_lr):
 
         train_dataset = myDataset(data_set='train', n_mfcc=39)
         train_loader = myDataLoader(train_dataset, batch_size=4, shuffle=True,
-                    num_workers=10, pin_memory=False)
+                    num_workers=4, pin_memory=False)
         train(model, train_loader, loss_fn, optimizer, print_every=20)
         acc = dev(model)
         model_path_accept = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'.pkl'
         model_path_reject = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'_rejected.pkl'
         
+        ##15轮迭代之后，开始调整学习率
         if count >= params['least_train_epoch']:
-            if acc > (acc_best + start_adjust_acc):
-                model_state = model.state_dict()
-                op_state = optimizer.state_dict()
+            model_state = model.state_dict()
+            op_state = optimizer.state_dict()
+            adjust_rate_flag = True
+
+            if acc > (acc_best + end_adjust_acc):            
                 acc_best = acc
                 torch.save(model_state, model_path_accept)
-            elif (acc > acc_best) and (not adjust_rate_flag):
-                adjust_rate_flag = True
-                model_state = model.state_dict()
-                op_state = optimizer.state_dict()
+            elif (acc > acc_best):
+                stop_train = True
                 acc_best = acc
                 torch.save(model_state, model_path_accept)
-            elif (acc <= acc_best) and (not adjust_rate_flag):
+            elif (acc <= acc_best):
                 torch.save(model.state_dict(), model_path_reject)
-                adjust_rate_flag = True
                 model.load_state_dict(model_state)
                 optimizer.load_state_dict(op_state)
-            elif adjust_rate_flag:
-                if acc > (acc_best + end_adjust_acc):
-                    model_state = model.state_dict()
-                    op_state = optimizer.state_dict()
-                    acc_best = acc
-                    torch.save(model_state, model_path_accept)
-                elif acc > acc_best:
-                    model_state = model.state_dict()
-                    op_state = optimizer.state_dict()
-                    acc_best = acc
-                    torch.save(model_state, model_path_accept)
-                    stop_train = True
-                else:
-                    torch.save(model.state_dict(), model_path_reject)
-                    model.load_state_dict(model_state)
-                    optimizer.load_state_dict(op_state)
-                    stop_train = True
+        
         time_used = (time.time() - start_time) / 60
         print("epoch %d done, cv acc is: %.4f, time_used: %.4f minutes" % (count, acc, time_used))
         logger.info("epoch %d done, cv acc is: %.4f, time_used: %.4f minutes" % (count, acc, time_used))
@@ -204,5 +187,5 @@ def result_record(params):
     f.close()
 
 if __name__ == '__main__':
-    main(0.0003)
+    main(0.001)
 
