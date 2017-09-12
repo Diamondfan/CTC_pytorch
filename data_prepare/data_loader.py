@@ -14,12 +14,13 @@ data_dir = '/home/fan/pytorch/CTC_pytorch/data_prepare/timit'
 #Override the class of Dataset
 #Define my own dataset over timit used the feature extracted by kaldi
 class myDataset(Dataset):
-    def __init__(self, data_set='train', n_mfcc=39):
-        self.n_mfcc = n_mfcc
+    def __init__(self, data_set='train', feature_type='mfcc', n_feats=39):
+        self.n_feats = n_feats
         self.data_set = data_set
-        h5_file = os.path.join(data_dir, data_set+'.h5py')
-        mfcc_file = os.path.join(data_dir, data_set+'_mfcc.txt')
-        label_file = os.path.join(data_dir, data_set+'_label.txt')
+        self.feature_type = feature_type
+        h5_file = os.path.join(data_dir, feature_type+'_tmp', data_set+'.h5py')
+        mfcc_file = os.path.join(data_dir, "feature_"+feature_type, data_set+'.txt')
+        label_file = os.path.join(data_dir,"label_char", data_set+'_label.txt')
         char_file = os.path.join(data_dir, 'char_list.txt')
         if not os.path.exists(h5_file):
             print("Process %s data in kaldi format..." % data_set)
@@ -64,7 +65,7 @@ class myDataset(Dataset):
                 mfcc_dict[utt] = list()
                 continue
             if len(line) > 2:
-                for i in range(self.n_mfcc):
+                for i in range(self.n_feats):
                     mfcc_frame.append(float(line[i]))
             mfcc_dict[utt].append(mfcc_frame)
         f.close()
@@ -138,7 +139,7 @@ class myDataLoader(DataLoader):
         self.collate_fn = create_input
 
 if __name__ == '__main__':
-    dev_dataset = myDataset(data_set='dev', n_mfcc=39)
+    dev_dataset = myDataset(data_set='dev', feature_type="fbank", n_feats=40)
     dev_loader = myDataLoader(dev_dataset, batch_size=8, shuffle=True, 
                      num_workers=4, pin_memory=False)
     i = 0
