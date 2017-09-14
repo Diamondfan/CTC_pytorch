@@ -40,14 +40,14 @@ class InferenceBatchLogSoftmax(nn.Module):
 
 class BatchRNN(nn.Module):
     def __init__(self, input_size, hidden_size, rnn_type=nn.LSTM, 
-            bidirectional=False, batch_norm=True):
+            bidirectional=False, batch_norm=True, dropout = 0.1):
         super(BatchRNN, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bidirectional = bidirectional
         self.batch_norm = SequenceWise(nn.BatchNorm1d(input_size)) if batch_norm else None
         self.rnn = rnn_type(input_size=input_size, hidden_size=hidden_size,
-                            bidirectional=bidirectional, bias=False)
+                            bidirectional=bidirectional, dropout = dropout, bias=False)
         
     def forward(self, x):
         if self.batch_norm is not None:
@@ -60,12 +60,13 @@ class BatchRNN(nn.Module):
 class CTC_RNN(nn.Module):
     def __init__(self, rnn_input_size=40, rnn_hidden_size=768, rnn_layers=5,
             rnn_type=nn.LSTM, bidirectional=True, 
-            batch_norm=True, num_class=28):
+            batch_norm=True, num_class=28, drop_out = 0.1):
         super(CTC_RNN, self).__init__()
         self.rnn_input_size = rnn_input_size
         self.rnn_hidden_size = rnn_hidden_size
         self.rnn_layers = rnn_layers
         self.rnn_type = rnn_type
+        self.num_class = num_class
         self.num_directions = 2 if bidirectional else 1
         
         rnns = []
@@ -76,7 +77,7 @@ class CTC_RNN(nn.Module):
         for i in range(rnn_layers-1):
             rnn = BatchRNN(input_size=self.num_directions*rnn_hidden_size, 
                     hidden_size=rnn_hidden_size, rnn_type=rnn_type, 
-                    bidirectional=bidirectional, batch_norm = batch_norm)
+                    bidirectional=bidirectional, dropout = drop_out, batch_norm = batch_norm)
             rnns.append(('%d' % (i+1), rnn))
 
         self.rnns = nn.Sequential(OrderedDict(rnns))
@@ -104,3 +105,25 @@ class CTC_RNN(nn.Module):
 
         return x
 
+    @staticmethod
+    def save_package(model, optimizer=None, decoder=None, epoch=None, loss_results=None, training_cer_results=None, dev_cer_results=None):
+        package = {
+                'input_size': model.rnn_input_size,
+                'hidden_size': model.rnn_hidden_size,
+                'rnn_layers': model.rnn_layers,
+                'rnn_type': model.rnn_type,
+                'num_class': model.num_class,
+                'bidirectional': model.num_directions,
+                'state_dict': model.state_dict()
+                }
+        if optimizer is not None:
+            package['optim_dict'] = optimizer.state_dict()
+        if decoder is not None:
+            package['decoder'] = decoder
+        if epoch is not None:
+            package['epoch'] = epoch
+        if loss_results is not None:
+            package['loss_results'] = loss_results
+            package['training_cer_results'] = training_cer_results
+            package['dev_cer_results'] = dev_cer_results
+        return package
