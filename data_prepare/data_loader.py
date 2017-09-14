@@ -79,7 +79,7 @@ class myDataset(Dataset):
         f = h5py.File(h5_file, 'w')
         for utt in mfcc_dict:
             grp = f.create_group(utt)
-            self.features_label.append((torch.FloatTensor(np.array(mfcc_dict[utt])), list(label_dict[utt])))
+            self.features_label.append((torch.FloatTensor(np.array(mfcc_dict[utt])), label_dict[utt].tolist()))
             grp.create_dataset('data', data=np.array(mfcc_dict[utt]))
             grp.create_dataset('label', data=label_dict[utt])
         print("Saved the %s data to h5py file" % self.data_set)
@@ -90,7 +90,7 @@ class myDataset(Dataset):
         self.features_label = []
         f = h5py.File(h5_file, 'r')
         for grp in f:
-            self.features_label.append((torch.FloatTensor(np.asarray(f[grp]['data'])), list(np.asarray(f[grp]['label']))))
+            self.features_label.append((torch.FloatTensor(np.asarray(f[grp]['data'])), np.asarray(f[grp]['label']).tolist()))
         print("Load %d sentences from %s dataset" % (self.__len__(), self.data_set))
 
     def __getitem__(self, idx):

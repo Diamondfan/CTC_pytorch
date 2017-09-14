@@ -94,7 +94,7 @@ def init_logger(log_file):
     logger.setLevel(logging.DEBUG)
     return logger
 
-def main(init_lr):
+def main():
     global logger
     log_file = './log/train.log'
     logger = init_logger(log_file)
@@ -106,9 +106,10 @@ def main(init_lr):
             dict(title='Timit Fbank40'+' CER on DEV', ylabel = 'DEV CER', xlabel = 'Epoch')]
     viz_window = [None, None, None]
     
-    num_epoches = 40
-    least_train_epoch = 20
-    end_adjust_acc = 0.05
+    init_lr = 0.001
+    num_epoches = 30
+    least_train_epoch = 10
+    end_adjust_acc = 2.0
     decay = 0.5
     count = 0
     learning_rate = init_lr
@@ -127,6 +128,7 @@ def main(init_lr):
                     num_class=28, drop_out = 0)
     if USE_CUDA:
         model = model.cuda()
+    
     loss_fn = CTCLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_lr, weight_decay=weight_decay)
     
@@ -140,14 +142,15 @@ def main(init_lr):
         if count >= num_epoches:
             break
         count += 1
-        print("Start training epoch: %d" % count)
-        logger.info("Start training epoch: %d" % count)
         
         if adjust_rate_flag:
             learning_rate *= decay
             for param in optimizer.param_groups:
                 param['lr'] *= decay
-
+        
+        print("Start training epoch: %d, learning_rate: %.5f" % (count, learning_rate))
+        logger.info("Start training epoch: %d, learning_rate: %.5f" % (count, learning_rate))
+        
         train_dataset = myDataset(data_set='train', feature_type="fbank", n_feats=40)
         train_loader = myDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                     num_workers=4, pin_memory=False)
@@ -163,11 +166,11 @@ def main(init_lr):
         model_path_accept = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'.pkl'
         model_path_reject = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'_rejected.pkl'
         
-        if adjust_time == 2:
+        if adjust_time == 5:
             stop_train = True
         
-        ##15轮迭代之后，开始调整学习率
-        if count >= params['least_train_epoch']:
+        ##10轮迭代之后，开始调整学习率
+        if count >= least_train_epoch:
             model_state = model.state_dict()
             op_state = optimizer.state_dict()
 
@@ -176,7 +179,8 @@ def main(init_lr):
                 acc_best = acc
                 torch.save(model_state, model_path_accept)
             elif (acc > acc_best):
-                stop_train = True
+                adjust_rate_flag = True
+                adjust_time += 1
                 acc_best = acc
                 torch.save(model_state, model_path_accept)
             elif (acc <= acc_best):
@@ -204,4 +208,4 @@ def main(init_lr):
     torch.save(CTC_RNN.save_package(model, optimizer=optimizer, epoch=params, loss_results=loss_results, training_cer_results=training_cer_results, dev_cer_results=dev_cer_results), best_path)
 
 if __name__ == '__main__':
-    main(0.001)
+    main()
