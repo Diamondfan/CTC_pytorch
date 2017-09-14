@@ -11,6 +11,7 @@ class Decoder(object):
         self.int_to_char = dict([(i, c) for (i, c) in enumerate(labels)])
         self.space_idx = space_idx
         self.blank_index = blank_index
+        self.num_word = 0
 
     def greedy_decoder(self, prob_tensor, frame_seq_len):
         prob_tensor = prob_tensor.transpose(0,1)         #batch_size*seq_len*output_size
@@ -36,7 +37,6 @@ class Decoder(object):
         target_strings = self._process_strings(self._convert_to_strings(targets))
         cer = 0
         wer = 0
-        self.num_word = 0
         for x in range(len(target_strings)):
             cer += self.cer(strings[x], target_strings[x])
             wer += self.wer(strings[x], target_strings[x])
@@ -115,48 +115,43 @@ class Decoder(object):
         return dist[L1][L2]
 
 
-class GreedyDecoder_test(Decoder):
-    def __init__(self, labels, output = 'char', space_idx = -1):
-        super(GreedyDecoder_test, self).__init__(space_idx)
-        self.labels = labels
-        self.output = output
-
-
+class GreedyDecoder(Decoder):
     def decode(self, prob_tensor, frame_seq_len):
         prob_tensor = prob_tensor.transpose(0,1)         # (n, t, c)
         _, decoded = torch.max(prob_tensor, 2)
         decoded = decoded.view(decoded.size(0), decoded.size(1))
-        decoded = self._process_seqs(decoded, frame_seq_len, remove_rep = True)
-        decoded = self._convert_to_chars(decoded, self.labels)     # convert digit idx to chars
-        if self.output == 'word':
-             decoded = self._convert_to_words(decoded)
-        return decoded
+        decoded = self._convert_to_strings(decoded, frame_seq_len)     # convert digit idx to chars
+        return self._process_strings(decoded, remove_rep=True)
 
 
-class BeamDecoder_test(Decoder):
-    def __init__(self, labels, scorer, top_paths = 1, beam_width = 20, output = 'char', space_idx = -1):
-        super(BeamDecoder_test, self).__init__(space_idx)
-        self.labels = labels
-        self.output = output
-        assert top_paths == 1, "Only supports top 1 path in the current version"
+class BeamDecoder(Decoder):
+    def __init__(self, labels, top_paths = 1, beam_width = 200, blank_index = 0, space_idx = 28,
+                    lm_path=None, trie_path=None, lm_alpha=None, lm_beta1=None, lm_beta2=None):
+        super(BeamDecoder, self).__init__(labels, space_idx=space_idx, blank_index=blank_index)
+        self.beam_width = beam_width
+        self.top_n = top_paths
 
         try:
-            import pytorch_ctc
+            from pytorch_ctc import CTCBeamDecoder, Scorer, KenLMScorer
         except ImportError:
             raise ImportError("BeamCTCDecoder requires pytorch_ctc package.")
 
-        self._decoder = pytorch_ctc.CTCBeamDecoder(scorer = scorer, labels = self.labels, top_paths = top_paths, beam_width = beam_width, blank_index = 0, space_index = self.space_idx, merge_repeated=False)
+        if lm_path is not None:
+            scorer = KenLMScorer(labels, lm_path, trie_path)
+            scorer.set_lm_weight(lm_alpha)
+            scorer.set_word_weight(lm_beta1)
+            scorer.set_valid_word_weight(lm_beta2)
+        else:
+            scorer = Scorer()
+        self._decoder = CTCBeamDecoder(scorer = scorer, labels = self.labels, top_paths = top_paths, beam_width = beam_width, blank_index = blank_index, space_index = space_idx, merge_repeated=False)
 
     def decode(self, prob_tensor, frame_seq_len):
         frame_seq_len = torch.IntTensor(frame_seq_len).cpu()
         decoded, _, out_seq_len = self._decoder.decode(prob_tensor, seq_len = frame_seq_len)
         decoded = decoded[0]
         out_seq_len = out_seq_len[0]
-        decoded = self._process_seqs(decoded, out_seq_len, remove_rep = False)
-        decoded = self._convert_to_chars(decoded, self.labels)     # convert digit idx to chars
-        if self.output == 'word':
-            decoded = self._convert_to_words(decoded)
-        return decoded
+        decoded = self._convert_to_strings(decoded, out_seq_len)
+        return self._process_strings(decoded)
 
 if __name__ == '__main__':
     decoder = Decoder('abcde', 1, 2)
