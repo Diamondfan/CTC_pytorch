@@ -59,12 +59,13 @@ def dev(model, data):
     model.eval()
     total_cer = 0
     total_tokens = 0
-    decoder  = Decoder("#'acbedgfihkjmlonqpsrutwvyxz_", space_idx=28, blank_index=0)
+
     
-    dev_dataset = myDataset(data_set=data, feature_type="fbank", n_feats=40)
+    dev_dataset = myDataset(data_set=data, feature_type="fbank", out_type='phone', n_feats=40)
     dev_loader = myDataLoader(dev_dataset, batch_size=8, shuffle=False,
                     num_workers=4, pin_memory=False)
-
+    decoder  = Decoder(dev_dataset.int2phone, space_idx=-1, blank_index=0)
+    
     for data in dev_loader:
         inputs, targets, input_sizes, input_sizes_list, target_sizes =data
         inputs = inputs.transpose(0, 1)
@@ -77,7 +78,10 @@ def dev(model, data):
         probs = model(inputs)
         
         probs = probs.data.cpu()
-        total_cer += decoder.phone_word_error(probs, input_sizes_list, targets, target_sizes)[0]
+        if decoder.space_idx == -1:
+            total_cer += decoder.phone_word_error(probs, input_sizes_list, targets, target_sizes)[1]
+        else:
+            total_cer += decoder.phone_word_error(probs, input_sizes_list, targets, target_sizes)[0]
         total_tokens += sum(target_sizes)
     acc = 1 - float(total_cer) / total_tokens
     return acc*100
@@ -108,13 +112,13 @@ def main():
     
     init_lr = 0.001
     num_epoches = 30
-    least_train_epoch = 10
-    end_adjust_acc = 2.0
+    least_train_epoch = 5
+    end_adjust_acc = 1.0
     decay = 0.5
     count = 0
     learning_rate = init_lr
     batch_size = 8
-    weight_decay = 0.0001
+    weight_decay = 0.01
     
     params = { 'num_epoches':num_epoches, 'least_train_epoch':least_train_epoch, 'end_adjust_acc':end_adjust_acc,
             'decay':decay, 'learning_rate':init_lr, 'weight_decay':weight_decay, 'batch_size':batch_size }
@@ -125,7 +129,7 @@ def main():
 
     model = CTC_RNN(rnn_input_size=40, rnn_hidden_size=256, rnn_layers=4, 
                     rnn_type=nn.LSTM, bidirectional=True, batch_norm=True, 
-                    num_class=28, drop_out = 0)
+                    num_class=48, drop_out = 0)
     if USE_CUDA:
         model = model.cuda()
     
@@ -151,7 +155,7 @@ def main():
         print("Start training epoch: %d, learning_rate: %.5f" % (count, learning_rate))
         logger.info("Start training epoch: %d, learning_rate: %.5f" % (count, learning_rate))
         
-        train_dataset = myDataset(data_set='train', feature_type="fbank", n_feats=40)
+        train_dataset = myDataset(data_set='train', feature_type="fbank", out_type='phone', n_feats=40)
         train_loader = myDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                     num_workers=4, pin_memory=False)
         loss = train(model, train_loader, loss_fn, optimizer, print_every=20)
@@ -164,29 +168,30 @@ def main():
         dev_cer_results.append(acc)
         
         model_path_accept = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'.pkl'
-        model_path_reject = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'_rejected.pkl'
+        #model_path_reject = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'_rejected.pkl'
         
-        if adjust_time == 5:
+        if adjust_time == 8:
             stop_train = True
         
         ##10轮迭代之后，开始调整学习率
         if count >= least_train_epoch:
-            model_state = model.state_dict()
-            op_state = optimizer.state_dict()
-
             if acc > (acc_best + end_adjust_acc):            
+                model_state = model.state_dict()
+                op_state = optimizer.state_dict()
                 adjust_rate_flag = False
                 acc_best = acc
-                torch.save(model_state, model_path_accept)
+                #torch.save(model_state, model_path_accept)
             elif (acc > acc_best):
+                model_state = model.state_dict()
+                op_state = optimizer.state_dict()
                 adjust_rate_flag = True
                 adjust_time += 1
                 acc_best = acc
-                torch.save(model_state, model_path_accept)
+                #torch.save(model_state, model_path_accept)
             elif (acc <= acc_best):
                 adjust_rate_flag = True
                 adjust_time += 1
-                torch.save(model.state_dict(), model_path_reject)
+                #torch.save(model.state_dict(), model_path_reject)
                 model.load_state_dict(model_state)
                 optimizer.load_state_dict(op_state)
         

@@ -14,14 +14,15 @@ data_dir = '/home/fan/pytorch/CTC_pytorch/data_prepare/timit'
 #Override the class of Dataset
 #Define my own dataset over timit used the feature extracted by kaldi
 class myDataset(Dataset):
-    def __init__(self, data_set='train', feature_type='mfcc', n_feats=39):
+    def __init__(self, data_set='train', feature_type='mfcc', out_type='phone', n_feats=39):
         self.n_feats = n_feats
         self.data_set = data_set
+        self.out_type = out_type
         self.feature_type = feature_type
-        h5_file = os.path.join(data_dir, feature_type+'_tmp', data_set+'.h5py')
+        h5_file = os.path.join(data_dir, feature_type+'_'+out_type+'_tmp', data_set+'.h5py')
         mfcc_file = os.path.join(data_dir, "feature_"+feature_type, data_set+'.txt')
-        label_file = os.path.join(data_dir,"label_char", data_set+'_label.txt')
-        char_file = os.path.join(data_dir, 'char_list.txt')
+        label_file = os.path.join(data_dir,"label_"+out_type, data_set+'.text')
+        char_file = os.path.join(data_dir, out_type+'_list.txt')
         if not os.path.exists(h5_file):
             print("Process %s data in kaldi format..." % data_set)
             self.process_txt(mfcc_file, label_file, char_file, h5_file)
@@ -32,25 +33,35 @@ class myDataset(Dataset):
     def process_txt(self, mfcc_file, label_file, char_file, h5_file):
         #read map file
         self.char_map = dict()
+        self.int2phone = dict()
         f = open(char_file, 'r')
         for line in f.readlines():
-            char, num = line.split(' ')
-            self.char_map[char] = int(num.strip())
+            char, num = line.strip().split(' ')
+            self.char_map[char] = int(num)
+            self.int2phone[int(num)] = char
         f.close()
+        self.int2phone[0] = '#'
+        
 
         #read the label file
         label_dict = dict()
         f = open(label_file, 'r')
         for label in f.readlines():
             label = label.strip()
-            utt = label.split('\t', 1)[0]
-            label = label.split('\t', 1)[1]
             label_list = []
-            for i in range(len(label)):
-                if label[i].lower() in self.char_map:
-                    label_list.append(self.char_map[label[i].lower()])
-                if label[i] == ' ':
-                    label_list.append(28)
+            if self.out_type == 'char':
+                utt = label.split('\t', 1)[0]
+                label = label.split('\t', 1)[1]
+                for i in range(len(label)):
+                    if label[i].lower() in self.char_map:
+                        label_list.append(self.char_map[label[i].lower()])
+                    if label[i] == ' ':
+                        label_list.append(28)
+            else:
+                label = label.split()
+                utt = label[0]
+                for i in range(1,len(label)):
+                    label_list.append(self.char_map[label[i]])
             label_dict[utt] = np.array(label_list)
         f.close()
         
@@ -77,6 +88,8 @@ class myDataset(Dataset):
         self.features_label = []
         #save the data as h5 file
         f = h5py.File(h5_file, 'w')
+        f.create_dataset("phone_map_key", data=self.char_map.keys())
+        f.create_dataset("phone_map_value", data = self.char_map.values())
         for utt in mfcc_dict:
             grp = f.create_group(utt)
             self.features_label.append((torch.FloatTensor(np.array(mfcc_dict[utt])), label_dict[utt].tolist()))
@@ -90,7 +103,16 @@ class myDataset(Dataset):
         self.features_label = []
         f = h5py.File(h5_file, 'r')
         for grp in f:
-            self.features_label.append((torch.FloatTensor(np.asarray(f[grp]['data'])), np.asarray(f[grp]['label']).tolist()))
+            if grp != 'phone_map_key' and grp != 'phone_map_value':
+                self.features_label.append((torch.FloatTensor(np.asarray(f[grp]['data'])), np.asarray(f[grp]['label']).tolist()))
+        self.char_map = dict()
+        self.int2phone = dict()
+        keys = f['phone_map_key']
+        values = f['phone_map_value']
+        for i in range(len(keys)):
+            self.char_map[keys[i]] = values[i]
+            self.int2phone[values[i]] = keys[i]
+        self.int2phone[0]='#'
         print("Load %d sentences from %s dataset" % (self.__len__(), self.data_set))
 
     def __getitem__(self, idx):
@@ -139,9 +161,10 @@ class myDataLoader(DataLoader):
         self.collate_fn = create_input
 
 if __name__ == '__main__':
-    dev_dataset = myDataset(data_set='dev', feature_type="fbank", n_feats=40)
+    dev_dataset = myDataset(data_set='dev', feature_type="fbank", out_type='phone', n_feats=40)
     dev_loader = myDataLoader(dev_dataset, batch_size=8, shuffle=True, 
                      num_workers=4, pin_memory=False)
+    print(dev_dataset.int2phone)
     i = 0
     for data in dev_loader:
         if i == 0:

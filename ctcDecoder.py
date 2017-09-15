@@ -6,12 +6,12 @@
 import torch
 
 class Decoder(object):
-    def __init__(self, labels, space_idx = 1, blank_index = 0):
-        self.labels = labels
-        self.int_to_char = dict([(i, c) for (i, c) in enumerate(labels)])
+    def __init__(self, int2char, space_idx = 1, blank_index = 0):
+        self.int_to_char = int2char
         self.space_idx = space_idx
         self.blank_index = blank_index
         self.num_word = 0
+        self.num_char = 0
 
     def greedy_decoder(self, prob_tensor, frame_seq_len):
         prob_tensor = prob_tensor.transpose(0,1)         #batch_size*seq_len*output_size
@@ -41,6 +41,7 @@ class Decoder(object):
             cer += self.cer(strings[x], target_strings[x])
             wer += self.wer(strings[x], target_strings[x])
             self.num_word += len(target_strings[x].split())
+            self.num_char += len(target_strings[x])
         return cer, wer
 
     def _unflatten_targets(self, targets, target_sizes):
@@ -64,10 +65,12 @@ class Decoder(object):
             if char != self.int_to_char[self.blank_index]:
                 if remove_rep and i != 0 and char == seq[i - 1]: #remove dumplicates
                     pass
-                elif char == self.labels[self.space_idx]:
+                elif self.space_idx == -1:
+                    string = string + ' '+ char
+                elif char == self.int_to_char[self.space_idx]:
                     string += ' '
                 else:
-                    string = string + char          
+                    string = string + char
         return string
 
     def _convert_to_strings(self, seq, sizes=None):
@@ -82,7 +85,10 @@ class Decoder(object):
         result = []
         for i in range(sizes):
             result.append(self.int_to_char[seq[i]])
-        return ''.join(result)
+        if self.space_idx == -1:
+            return result
+        else:
+            return ''.join(result)
  
     def wer(self, s1, s2):
         b = set(s1.split() + s2.split())
