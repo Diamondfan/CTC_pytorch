@@ -4,6 +4,7 @@
 #greedy decoder and beamsearch decoder for ctc
 
 import torch
+import numpy as np
 
 class Decoder(object):
     def __init__(self, int2char, space_idx = 1, blank_index = 0):
@@ -131,22 +132,34 @@ class GreedyDecoder(Decoder):
 
 
 class BeamDecoder(Decoder):
-    def __init__(self, labels, top_paths = 1, beam_width = 200, blank_index = 0, space_idx = 28,
-                    lm_path=None, trie_path=None, lm_alpha=None, lm_beta1=None, lm_beta2=None):
-        super(BeamDecoder, self).__init__(labels, space_idx=space_idx, blank_index=blank_index)
+    def __init__(self, int2char, top_paths = 1, beam_width = 200, blank_index = 0, space_idx = 28,
+                    lm_path=None, trie_path=None, dict_path=None, lm_alpha=None, lm_beta1=None, lm_beta2=None):
         self.beam_width = beam_width
         self.top_n = top_paths
+        self.labels = ['#']
+        int2phone = dict()
+        for digit in int2char:
+            if digit != 0:
+                label = bytes.decode(int2char[digit].tostring())
+                self.labels.append(label)
+            int2phone[digit] = label
+        int2phone[0] = '#'
+        super(BeamDecoder, self).__init__(int2phone, space_idx=space_idx, blank_index=blank_index)
+        self.label2 = '#123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM'
 
         try:
             from pytorch_ctc import CTCBeamDecoder, Scorer, KenLMScorer
+            import pytorch_ctc
         except ImportError:
             raise ImportError("BeamCTCDecoder requires pytorch_ctc package.")
 
         if lm_path is not None:
-            scorer = KenLMScorer(labels, lm_path, trie_path)
+            pytorch_ctc.generate_lm_trie(dict_path, lm_path, trie_path, self.label2, 0, -1)
+            scorer = KenLMScorer(self.label2, lm_path, trie_path)
             scorer.set_lm_weight(lm_alpha)
             scorer.set_word_weight(lm_beta1)
             scorer.set_valid_word_weight(lm_beta2)
+            print('hello')
         else:
             scorer = Scorer()
         self._decoder = CTCBeamDecoder(scorer = scorer, labels = self.labels, top_paths = top_paths, beam_width = beam_width, blank_index = blank_index, space_index = space_idx, merge_repeated=False)

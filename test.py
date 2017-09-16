@@ -9,7 +9,6 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 import time
-#import pytorch_ctc
 
 def test(model_path):
     package = torch.load(model_path)
@@ -20,7 +19,7 @@ def test(model_path):
     rnn_type = package['rnn_type']
     num_class = package["num_class"]
 
-    decoder_type = 'Greedy'    
+    decoder_type = 'Greedy' 
 
     model = CTC_RNN(rnn_input_size=input_size, rnn_hidden_size=hidden_size, rnn_layers=layers,
                     rnn_type=rnn_type, bidirectional=True, batch_norm=True, num_class=num_class)
@@ -38,7 +37,9 @@ def test(model_path):
     if decoder_type == 'Greedy':
         decoder  = GreedyDecoder(test_dataset.int2phone, space_idx=-1, blank_index=0)
     else:
-        decoder = BeamDecoder(labels, top_paths=3, beam_width=20, space_idx=28, blank_index=0, lm_path='./data_prepare/bigram.ken', trie_path='./data_prepare/trie', lm_alpha=4, lm_beta1=1, lm_beta2=5)
+        decoder = BeamDecoder(test_dataset.int2phone, top_paths=2, beam_width=20, space_idx=-1, blank_index=0, 
+                                lm_path='./bigram.binary', dict_path='./dict.txt', 
+                                trie_path='./trie', lm_alpha=4, lm_beta1=1, lm_beta2=1)
 
     
     total_wer = 0
@@ -70,5 +71,5 @@ def test(model_path):
     print("Word error rate on test set: %.4f" % WER)
 
 if __name__ == "__main__":
-    test(model_path = './log/best_model_cv78.9333864648.pkl')
+    test(model_path = './log/exp_4lstm_320hidden_5lepoch/best_model_cv79.644019393.pkl')
     
