@@ -8,25 +8,53 @@ import torch
 import sys
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
+import torchaudio
+import scipy.signal
+import librosa
+
+windows = {'hamming':scipy.signal.hamming, 'hann':scipy.signal.hann, 'blackman':scipy.signal.blackman,
+            'bartlett':scipy.signal.bartlett}
+audio_conf = {"sample_rate":16000, 'window_size':0.025, 'window_stride':0.01, 'window': 'hamming'}
+
+def load_audio(path):
+    sound, _ = torchaudio.load(path)
+    sound = sound.numpy()
+    if len(sound.shape) > 1:
+        if sound.shape[1] == 1:
+            sound = sound.squeeze()
+        else:
+            sound - sound.mean(axis=1)
+    return sound
 
 data_dir = '/home/fan/pytorch/CTC_pytorch/data_prepare/timit'
 
 #Override the class of Dataset
 #Define my own dataset over timit used the feature extracted by kaldi
 class myDataset(Dataset):
-    def __init__(self, data_set='train', feature_type='mfcc', out_type='phone', n_feats=39):
-        self.n_feats = n_feats
+    def __init__(self, data_set='train', feature_type='spectrum', out_type='phone', n_feats=39, normalize=True):
         self.data_set = data_set
         self.out_type = out_type
         self.feature_type = feature_type
+        self.normalize = normalize
         h5_file = os.path.join(data_dir, feature_type+'_'+out_type+'_tmp', data_set+'.h5py')
+        wav_path = os.path.join(data_dir, 'wav_path', data_set+'.wav.scp')
         mfcc_file = os.path.join(data_dir, "feature_"+feature_type, data_set+'.txt')
         label_file = os.path.join(data_dir,"label_"+out_type, data_set+'.text')
         char_file = os.path.join(data_dir, out_type+'_list.txt')
         if not os.path.exists(h5_file):
-            print("Process %s data in kaldi format..." % data_set)
-            self.process_txt(mfcc_file, label_file, char_file, h5_file)
+            if feature_type != 'spectrum':
+                self.n_feats = n_feats
+                print("Process %s data in kaldi format..." % data_set)
+                self.process_txt(mfcc_file, label_file, char_file, h5_file)
+            else:
+                print("Extract spectrum with librosa...")
+                self.n_feats = int(audio_conf['sample_rate']*audio_conf['window_size']/2+1)
+                self.process_audio(wav_path, label_file, char_file, h5_file)
         else:
+            if feature_type != "spectrum":
+                self.n_feats = n_feats
+            else:
+                self.n_feats = int(audio_conf["sample_rate"]*audio_conf["window_size"]/2+1)
             print("Loading %s data from h5py file..." % data_set)
             self.load_h5py(h5_file)
     
@@ -98,7 +126,86 @@ class myDataset(Dataset):
         print("Saved the %s data to h5py file" % self.data_set)
         #print(self.__getitem__(1))
             
-            
+    def process_audio(self, wav_path, label_file, char_file, h5_file):
+        #read map file
+        self.char_map = dict()
+        self.int2phone = dict()
+        f = open(char_file, 'r')
+        for line in f.readlines():
+            char, num = line.strip().split(' ')
+            self.char_map[char] = int(num)
+            self.int2phone[int(num)] = char
+        f.close()
+        self.int2phone[0] = '#'
+        
+        #read the label file
+        label_dict = dict()
+        f = open(label_file, 'r')
+        for label in f.readlines():
+            label = label.strip()
+            label_list = []
+            if self.out_type == 'char':
+                utt = label.split('\t', 1)[0]
+                label = label.split('\t', 1)[1]
+                for i in range(len(label)):
+                    if label[i].lower() in self.char_map:
+                        label_list.append(self.char_map[label[i].lower()])
+                    if label[i] == ' ':
+                        label_list.append(28)
+            else:
+                label = label.split()
+                utt = label[0]
+                for i in range(1,len(label)):
+                    label_list.append(self.char_map[label[i]])
+            label_dict[utt] = np.array(label_list)
+        f.close()
+        
+        #extract spectrum
+        spec_dict = dict()
+        f = open(wav_path, 'r')
+        for line in f.readlines():
+            utt, path = line.strip().split()
+            spect = self.parse_audio(path)
+            #print(spect)
+            spec_dict[utt] = spect.numpy()
+        f.close()
+        
+        if len(spec_dict) != len(label_dict):
+            print("%s data: The num of wav and text are not the same!" % self.data_set)
+            sys.exit(1)
+
+        self.features_label = []
+        #save the data as h5 file
+        f = h5py.File(h5_file, 'w')
+        f.create_dataset("phone_map_key", data=self.char_map.keys())
+        f.create_dataset("phone_map_value", data = self.char_map.values())
+        for utt in spec_dict:
+            grp = f.create_group(utt)
+            self.features_label.append((torch.FloatTensor(spec_dict[utt]), label_dict[utt].tolist()))
+            grp.create_dataset('data', data=spec_dict[utt])
+            grp.create_dataset('label', data=label_dict[utt])
+        print("Saved the %s data to h5py file" % self.data_set)
+
+    
+    def parse_audio(self, path):
+        y = load_audio(path)
+        n_fft = int(audio_conf['sample_rate']*audio_conf["window_size"])
+        win_length = n_fft
+        hop_length = int(audio_conf['sample_rate']*audio_conf['window_stride'])
+        window = windows[audio_conf['window']]
+        D = librosa.stft(y, n_fft=n_fft, hop_length=hop_length,
+                            win_length=win_length, window=window)
+        spect, phase = librosa.magphase(D)
+        spect = np.log1p(spect)
+        spect = torch.FloatTensor(spect)
+        if self.normalize:
+            mean = spect.mean()
+            std = spect.std()
+            spect.add_(-mean)
+            spect.div_(std)
+        
+        return spect.transpose(0,1)
+
     def load_h5py(self, h5_file):
         self.features_label = []
         f = h5py.File(h5_file, 'r')
@@ -110,7 +217,7 @@ class myDataset(Dataset):
         keys = f['phone_map_key']
         values = f['phone_map_value']
         for i in range(len(keys)):
-            self.char_map[keys[i]] = values[i]
+            self.char_map[str(keys[i])] = values[i]
             self.int2phone[values[i]] = keys[i]
         self.int2phone[0]='#'
         print("Load %d sentences from %s dataset" % (self.__len__(), self.data_set))
@@ -161,7 +268,7 @@ class myDataLoader(DataLoader):
         self.collate_fn = create_input
 
 if __name__ == '__main__':
-    dev_dataset = myDataset(data_set='dev', feature_type="fbank", out_type='phone', n_feats=40)
+    dev_dataset = myDataset(data_set='dev', feature_type="spectrum", out_type='phone', n_feats=40)
     dev_loader = myDataLoader(dev_dataset, batch_size=8, shuffle=True, 
                      num_workers=4, pin_memory=False)
     print(dev_dataset.int2phone)
