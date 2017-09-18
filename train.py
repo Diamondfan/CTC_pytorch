@@ -55,17 +55,11 @@ def train(model, train_loader, loss_fn, optimizer, print_every=10):
     logger.info("Epoch done, average loss: %.4f" % average_loss)
     return average_loss
 
-def dev(model, data):
+def dev(model, dev_loader, decoder):
     model.eval()
     total_cer = 0
     total_tokens = 0
 
-    
-    dev_dataset = myDataset(data_set=data, feature_type="fbank", out_type='phone', n_feats=40)
-    dev_loader = myDataLoader(dev_dataset, batch_size=8, shuffle=False,
-                    num_workers=4, pin_memory=False)
-    decoder  = Decoder(dev_dataset.int2phone, space_idx=-1, blank_index=0)
-    
     for data in dev_loader:
         inputs, targets, input_sizes, input_sizes_list, target_sizes =data
         inputs = inputs.transpose(0, 1)
@@ -105,9 +99,9 @@ def main():
     
     from visdom import Visdom
     viz = Visdom()
-    opts = [dict(title="Timit Fbank40"+" Loss", ylabel = 'Loss', xlabel = 'Epoch'),
-            dict(title="Timit Fbank40"+" CER on Train", ylabel = 'CER', xlabel = 'Epoch'),
-            dict(title='Timit Fbank40'+' CER on DEV', ylabel = 'DEV CER', xlabel = 'Epoch')]
+    opts = [dict(title="Timit Spectrum201"+" Loss", ylabel = 'Loss', xlabel = 'Epoch'),
+            dict(title="Timit Specturm201"+" CER on Train", ylabel = 'CER', xlabel = 'Epoch'),
+            dict(title='Timit Spectrum201'+' CER on DEV', ylabel = 'DEV CER', xlabel = 'Epoch')]
     viz_window = [None, None, None]
     
     init_lr = 0.001
@@ -127,7 +121,17 @@ def main():
     adjust_rate_flag = False
     stop_train = False
 
-    model = CTC_RNN(rnn_input_size=40, rnn_hidden_size=256, rnn_layers=4, 
+    train_dataset = myDataset(data_set='train', feature_type="spectrum", out_type='phone', n_feats=39)
+    train_loader = myDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                    num_workers=4, pin_memory=False)
+    
+    dev_dataset = myDataset(data_set="dev", feature_type="spectrum", out_type='phone', n_feats=39)
+    dev_loader = myDataLoader(dev_dataset, batch_size=batch_size, shuffle=False,
+                    num_workers=4, pin_memory=False)
+    decoder = Decoder(dev_dataset.int2phone, space_idx=-1, blank_index=0)
+    
+    rnn_input_size = train_dataset.n_feats
+    model = CTC_RNN(rnn_input_size=rnn_input_size, rnn_hidden_size=256, rnn_layers=4, 
                     rnn_type=nn.LSTM, bidirectional=True, batch_norm=True, 
                     num_class=48, drop_out = 0)
     if USE_CUDA:
@@ -155,16 +159,13 @@ def main():
         print("Start training epoch: %d, learning_rate: %.5f" % (count, learning_rate))
         logger.info("Start training epoch: %d, learning_rate: %.5f" % (count, learning_rate))
         
-        train_dataset = myDataset(data_set='train', feature_type="fbank", out_type='phone', n_feats=40)
-        train_loader = myDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
-                    num_workers=4, pin_memory=False)
         loss = train(model, train_loader, loss_fn, optimizer, print_every=20)
         loss_results.append(loss)
-        cer = dev(model, 'train')
+        cer = dev(model, train_loader, decoder)
         print("cer on training set is %.4f" % cer)
         logger.info("cer on training set is %.4f" % cer)
         training_cer_results.append(cer)
-        acc = dev(model, 'dev')
+        acc = dev(model, dev_loader, decoder)
         dev_cer_results.append(acc)
         
         model_path_accept = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'.pkl'
@@ -210,6 +211,9 @@ def main():
     logger.info("End training, best cv acc is: %.4f" % acc_best)
     best_path = './log/best_model'+'_cv'+str(acc_best)+'.pkl'
     params['epoch']=count
+    params['feature_type'] = train_dataset.feature_type
+    params['n_feats'] = train_dataset.n_feats
+    params['out_type'] = train_dataset.out_type
     torch.save(CTC_RNN.save_package(model, optimizer=optimizer, epoch=params, loss_results=loss_results, training_cer_results=training_cer_results, dev_cer_results=dev_cer_results), best_path)
 
 if __name__ == '__main__':
