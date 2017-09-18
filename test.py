@@ -18,6 +18,9 @@ def test(model_path):
     hidden_size = package['hidden_size']
     rnn_type = package['rnn_type']
     num_class = package["num_class"]
+    feature_type = package['feature_type']
+    n_feats = package['n_feats']
+    out_type = package['out_type']
 
     decoder_type = 'Greedy' 
 
@@ -30,7 +33,7 @@ def test(model_path):
     if USE_CUDA:
         model = model.cuda()
 
-    test_dataset = myDataset(data_set='test', feature_type="fbank", out_type='phone', n_feats=40)
+    test_dataset = myDataset(data_set='test', feature_type=feature_type, out_type=out_type, n_feats=n_feats)
     test_loader = myDataLoader(test_dataset, batch_size=8, shuffle=False,
                     num_workers=4, pin_memory=False)
     
@@ -71,5 +74,5 @@ def test(model_path):
     print("Word error rate on test set: %.4f" % WER)
 
 if __name__ == "__main__":
-    test(model_path = './log/exp_4lstm_320hidden_5lepoch/best_model_cv79.644019393.pkl')
+    test('./log/exp_4lstm_256hidden_5lepoch_mfcc/best_model_cv78.8005578801.pkl')
     
