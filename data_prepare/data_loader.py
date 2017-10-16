@@ -55,6 +55,7 @@ class myDataset(Dataset):
                 self.n_feats = n_feats
             else:
                 self.n_feats = int(audio_conf["sample_rate"]*audio_conf["window_size"]/2+1)
+                #self.n_feats = n_feats
             print("Loading %s data from h5py file..." % data_set)
             self.load_h5py(h5_file)
     
@@ -228,7 +229,7 @@ class myDataset(Dataset):
     def __len__(self):
         return len(self.features_label) 
 
-def create_input(batch):
+def create_RNN_input(batch):
     def func(p):
         return p[0].size(0)
     
@@ -236,6 +237,7 @@ def create_input(batch):
     batch = sorted(batch, reverse=True, key=func)
     longest_sample = batch[0][0]
     feat_size = longest_sample.size(1)
+    #feat_size = 101
     max_length = longest_sample.size(0)
     batch_size = len(batch)
     inputs = torch.zeros(batch_size, max_length, feat_size)
@@ -246,6 +248,7 @@ def create_input(batch):
     for x in range(batch_size):
         sample = batch[x]
         feature = sample[0]
+        #feature = sample[0].transpose(0,1)[:101].transpose(0,1)
         label = sample[1]
         seq_length = feature.size(0)
         inputs[x].narrow(0, 0, seq_length).copy_(feature)
@@ -265,7 +268,40 @@ def create_input(batch):
 class myDataLoader(DataLoader):
     def __init__(self, *args, **kwargs):
         super(myDataLoader, self).__init__(*args, **kwargs)
-        self.collate_fn = create_input
+        self.collate_fn = create_RNN_input
+
+class myCNNDataLoader(DataLoader):
+    def __init__(self, *args, **kwargs):
+        super(myDataLoader, self).__init__(*args, **kwargs)
+        self.collate_fn = create_CNN_input
+
+def create_CNN_input(batch):
+    def func(p):
+        return p[0].size(0)
+    
+    #sort batch according to the frame nums
+    batch = sorted(batch, reverse=True, key=func)
+    longest_sample = batch[0][0]
+    feat_size = longest_sample.size(1)
+    max_length = longest_sample.size(0)
+    batch_size = len(batch)
+    inputs = torch.zeros(batch_size, 1, max_length, feat_size)
+    input_sizes = torch.IntTensor(batch_size)
+    target_sizes = torch.IntTensor(batch_size)
+    targets = []
+    input_size_list = []
+    for x in range(batch_size):
+        sample = batch[x]
+        feature = sample[0]
+        label = sample[1]
+        seq_length = feature.size(0)
+        inputs[x][0].narrow(0, 0, seq_length).copy_(feature)
+        input_sizes[x] = seq_length
+        input_size_list.append(seq_length)
+        target_sizes[x] = len(label)
+        targets.extend(label)
+    targets = torch.IntTensor(targets)
+    return inputs, targets, input_sizes, input_size_list, target_sizes 
 
 if __name__ == '__main__':
     dev_dataset = myDataset(data_set='dev', feature_type="spectrum", out_type='phone', n_feats=40)
