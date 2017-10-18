@@ -4,7 +4,7 @@
 #train process for the model
 
 from data_prepare.data_loader import myDataset
-from data_prepare.data_loader import myDataLoader
+from data_prepare.data_loader import myDataLoader, myCNNDataLoader
 from model import *
 from ctcDecoder import Decoder
 from warpctc_pytorch import CTCLoss
@@ -19,11 +19,13 @@ def train(model, train_loader, loss_fn, optimizer, print_every=10):
     model.train()
     
     total_loss = 0
+    print_loss = 0
     i = 0
     for data in train_loader:
         inputs, targets, input_sizes, input_sizes_list, target_sizes = data
-        inputs = inputs.transpose(0,1)
-        batch_size = inputs.size(1)
+        batch_size = inputs.size(0)
+        if model.name == 'CTC_RNN':
+            inputs = inputs.transpose(0,1)
         inputs = Variable(inputs, requires_grad=False)
         targets = Variable(targets, requires_grad=False)
         input_sizes = Variable(input_sizes, requires_grad=False)
@@ -32,22 +34,25 @@ def train(model, train_loader, loss_fn, optimizer, print_every=10):
         if USE_CUDA:
             inputs = inputs.cuda()
         
-        #pack padded input sequence
-        inputs = nn.utils.rnn.pack_padded_sequence(inputs, input_sizes_list)
+        if model.name == 'CTC_RNN':
+            #pack padded input sequence
+            inputs = nn.utils.rnn.pack_padded_sequence(inputs, input_sizes_list)
 
         out = model(inputs)
 
         loss = loss_fn(out, targets, input_sizes, target_sizes)
         loss /= batch_size
+        print_loss += loss.data[0]
 
         if (i + 1) % print_every == 0:
-            print('batch = %d, loss = %.4f' % (i+1, loss.data[0]))
-            logger.debug('batch = %d, loss = %.4f' % (i+1, loss.data[0]))
+            print('batch = %d, loss = %.4f' % (i+1, print_loss / print_every))
+            logger.debug('batch = %d, loss = %.4f' % (i+1, print_loss / print_every))
+            print_loss = 0
         
         total_loss += loss.data[0]
         optimizer.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm(model.parameters(), 400)
+        nn.utils.clip_grad_norm(model.parameters(), 400)                #防止梯度爆炸或者梯度消失，限制参数范围       
         optimizer.step()
         i += 1
     average_loss = total_loss / i
@@ -62,13 +67,16 @@ def dev(model, dev_loader, decoder):
 
     for data in dev_loader:
         inputs, targets, input_sizes, input_sizes_list, target_sizes =data
-        inputs = inputs.transpose(0, 1)
         batch_size = inputs.size(1)
+        if model.name == 'CTC_RNN':
+            inputs = inputs.transpose(0, 1)
+        
         inputs = Variable(inputs, volatile=True, requires_grad=False)
         if USE_CUDA:
             inputs = inputs.cuda()
         
-        inputs = nn.utils.rnn.pack_padded_sequence(inputs, input_sizes_list)
+        if model.name == 'CTC_RNN':
+            inputs = nn.utils.rnn.pack_padded_sequence(inputs, input_sizes_list)
         probs = model(inputs)
         
         probs = probs.data.cpu()
@@ -99,20 +107,21 @@ def main():
     
     from visdom import Visdom
     viz = Visdom()
-    opts = [dict(title="Timit Spectrum201"+" Loss", ylabel = 'Loss', xlabel = 'Epoch'),
-            dict(title="Timit Specturm201"+" CER on Train", ylabel = 'CER', xlabel = 'Epoch'),
-            dict(title='Timit Spectrum201'+' CER on DEV', ylabel = 'DEV CER', xlabel = 'Epoch')]
+    opts = [dict(title="Timit Spectrum_CNN"+" Loss", ylabel = 'Loss', xlabel = 'Epoch'),
+            dict(title="Timit Spectrum_CNN"+" CER on Train", ylabel = 'CER', xlabel = 'Epoch'),
+            dict(title='Timit Spectrum_CNN'+' CER on DEV', ylabel = 'DEV CER', xlabel = 'Epoch')]
     viz_window = [None, None, None]
     
     init_lr = 0.001
     num_epoches = 30
     least_train_epoch = 5
-    end_adjust_acc = 1.0
+    end_adjust_acc = 0.5
     decay = 0.5
     count = 0
     learning_rate = init_lr
     batch_size = 8
-    weight_decay = 0.01
+    weight_decay = 0.005
+    model_type = 'CNN_LSTM_CTC'
     
     params = { 'num_epoches':num_epoches, 'least_train_epoch':least_train_epoch, 'end_adjust_acc':end_adjust_acc,
             'decay':decay, 'learning_rate':init_lr, 'weight_decay':weight_decay, 'batch_size':batch_size }
@@ -121,19 +130,30 @@ def main():
     adjust_rate_flag = False
     stop_train = False
 
-    train_dataset = myDataset(data_set='train', feature_type="spectrum", out_type='phone', n_feats=39)
-    train_loader = myDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
-                    num_workers=4, pin_memory=False)
+    train_dataset = myDataset(data_set='train', feature_type="spectrum", out_type='phone', n_feats=201)
+    dev_dataset = myDataset(data_set="dev", feature_type="spectrum", out_type='phone', n_feats=201)
     
-    dev_dataset = myDataset(data_set="dev", feature_type="spectrum", out_type='phone', n_feats=39)
-    dev_loader = myDataLoader(dev_dataset, batch_size=batch_size, shuffle=False,
-                    num_workers=4, pin_memory=False)
     decoder = Decoder(dev_dataset.int2phone, space_idx=-1, blank_index=0)
     
     rnn_input_size = train_dataset.n_feats
-    model = CTC_RNN(rnn_input_size=rnn_input_size, rnn_hidden_size=256, rnn_layers=4, 
+    
+    if model_type == 'CNN_LSTM_CTC':
+        model = CNN_LSTM_CTC(rnn_input_size=rnn_input_size, rnn_hidden_size=256, rnn_layers=4, 
                     rnn_type=nn.LSTM, bidirectional=True, batch_norm=True, 
-                    num_class=48, drop_out = 0)
+                    num_class=48, drop_out=0)
+        train_loader = myCNNDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                        num_workers=4, pin_memory=False)
+        dev_loader = myCNNDataLoader(dev_dataset, batch_size=batch_size, shuffle=False,
+                        num_workers=4, pin_memory=False)
+    else:
+        model = CTC_RNN(rnn_input_size=rnn_input_size, rnn_hidden_size=256, rnn_layers=4, 
+                        rnn_type=nn.LSTM, bidirectional=True, batch_norm=True, 
+                        num_class=48, drop_out=0)
+        train_loader = myDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                        num_workers=4, pin_memory=False)
+        dev_loader = myDataLoader(dev_dataset, batch_size=batch_size, shuffle=False,
+                        num_workers=4, pin_memory=False)
+
     if USE_CUDA:
         model = model.cuda()
     

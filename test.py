@@ -18,9 +18,9 @@ def test(model_path):
     hidden_size = package['hidden_size']
     rnn_type = package['rnn_type']
     num_class = package["num_class"]
-    feature_type = package['feature_type']
-    n_feats = package['n_feats']
-    out_type = package['out_type']
+    feature_type = package['epoch']['feature_type']
+    n_feats = package['epoch']['n_feats']
+    out_type = package['epoch']['out_type']
 
     decoder_type = 'Greedy' 
 
@@ -50,12 +50,14 @@ def test(model_path):
     total_tokens = 0
     for data in test_loader:
         inputs, target, input_sizes, input_size_list, target_sizes = data 
-        inputs = inputs.transpose(0,1)
+        if model.name == 'CTC_RNN':
+            inputs = inputs.transpose(0,1)
         inputs = Variable(inputs, volatile=True, requires_grad=False)
         if USE_CUDA:
             inputs = inputs.cuda()
         
-        inputs = nn.utils.rnn.pack_padded_sequence(inputs, input_size_list)
+        if model.name == 'CTC_RNN':
+            inputs = nn.utils.rnn.pack_padded_sequence(inputs, input_size_list)
         probs = model(inputs)
         probs = probs.data.cpu()
         
@@ -74,5 +76,5 @@ def test(model_path):
     print("Word error rate on test set: %.4f" % WER)
 
 if __name__ == "__main__":
-    test('./log/exp_4lstm_256hidden_5lepoch_mfcc/best_model_cv78.8005578801.pkl')
-    
+    test('./log/best_model_cv78.7407850169.pkl')
+    #test('./log/exp_4lstm_256hidden_5lepoch_spectrum201_test75.5371/best_model_cv78.1364149565.pkl')

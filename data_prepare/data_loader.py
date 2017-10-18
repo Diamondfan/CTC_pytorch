@@ -11,6 +11,7 @@ from torch.utils.data import Dataset
 import torchaudio
 import scipy.signal
 import librosa
+import math
 
 windows = {'hamming':scipy.signal.hamming, 'hann':scipy.signal.hann, 'blackman':scipy.signal.blackman,
             'bartlett':scipy.signal.bartlett}
@@ -272,13 +273,18 @@ class myDataLoader(DataLoader):
 
 class myCNNDataLoader(DataLoader):
     def __init__(self, *args, **kwargs):
-        super(myDataLoader, self).__init__(*args, **kwargs)
+        super(myCNNDataLoader, self).__init__(*args, **kwargs)
         self.collate_fn = create_CNN_input
 
 def create_CNN_input(batch):
     def func(p):
         return p[0].size(0)
     
+    def change_size(size):
+        size = int(math.floor((size-11)/2)+1)
+        size = int(math.floor((size-11)/1)+1)
+        return size
+
     #sort batch according to the frame nums
     batch = sorted(batch, reverse=True, key=func)
     longest_sample = batch[0][0]
@@ -296,8 +302,8 @@ def create_CNN_input(batch):
         label = sample[1]
         seq_length = feature.size(0)
         inputs[x][0].narrow(0, 0, seq_length).copy_(feature)
-        input_sizes[x] = seq_length
-        input_size_list.append(seq_length)
+        input_sizes[x] = change_size(seq_length)
+        input_size_list.append(change_size(seq_length))
         target_sizes[x] = len(label)
         targets.extend(label)
     targets = torch.IntTensor(targets)
