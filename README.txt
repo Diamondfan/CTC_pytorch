@@ -43,11 +43,16 @@ Model part:
 	1 RNN + Batch + N RNN + Batch + 1 Linear , defined with class CTC_RNN
 	Add space ' and blank to 26 characters, so 29 categories.
 	Hidden_size for LSTM is 256  which can be set.
+	Update: 10.26
+	Add CNN before RNN:
+	USE (11, 21)kernel, stride=(2, 2)
+	The first stide 2 can decrease the frame for the input for RNN, and training become faste and with the same result
 
 Training:
 	initial_lr = 0.001
 	decay = 0.5
-	10 epoch for the initail_learning rate.
+	wight_decay = 0.005
+	5 epoch for the initail_learning rate.
 	After that, adjust the learning rate if the dev acc doesn't increase.
 	Optimizer is nn.optimizer.Adam with weigth decay 0.0001
 
@@ -60,7 +65,8 @@ Decoder:
 	   The package is used for beam search decode
 	   https://github.com/ryanleary/pytorch-ctc
 	   Also can add LM with decode.
-	   It seems to have few effect. No improvement comparing with Greedy decoder.
+	   With no LM, the CER can increase 0.2%
+           No test with LM.
 
 Test:
 	The same as training part with decoder but the CTC loss

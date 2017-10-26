@@ -21,8 +21,11 @@ class Decoder(object):
         strings = self._convert_to_strings(decoded, frame_seq_len)
         return self._process_strings(strings, remove_rep=True)
 
+    def decode(self):
+        raise NotImplementedError;
+
     def cer_wer(self, prob_tensor, frame_seq_len, targets, target_sizes):
-        strings = self.greedy_decoder(prob_tensor, frame_seq_len)
+        strings = self.decode(prob_tensor, frame_seq_len)
         targets = self._unflatten_targets(targets, target_sizes)
         target_strings = self._process_strings(self._convert_to_strings(targets))
         cer = 0
@@ -33,7 +36,7 @@ class Decoder(object):
         return cer, wer
 
     def phone_word_error(self, prob_tensor, frame_seq_len, targets, target_sizes):
-        strings = self.greedy_decoder(prob_tensor, frame_seq_len)
+        strings = self.decode(prob_tensor, frame_seq_len)
         targets = self._unflatten_targets(targets, target_sizes)
         target_strings = self._process_strings(self._convert_to_strings(targets))
         cer = 0
@@ -142,7 +145,7 @@ class BeamDecoder(Decoder):
             if digit != 0:
                 label = bytes.decode(int2char[digit].tostring())
                 self.labels.append(label)
-            int2phone[digit] = label
+                int2phone[digit] = label
         int2phone[0] = '#'
         super(BeamDecoder, self).__init__(int2phone, space_idx=space_idx, blank_index=blank_index)
         self.label2 = '#123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM'
@@ -159,7 +162,6 @@ class BeamDecoder(Decoder):
             scorer.set_lm_weight(lm_alpha)
             scorer.set_word_weight(lm_beta1)
             scorer.set_valid_word_weight(lm_beta2)
-            print('hello')
         else:
             scorer = Scorer()
         self._decoder = CTCBeamDecoder(scorer = scorer, labels = self.labels, top_paths = top_paths, beam_width = beam_width, blank_index = blank_index, space_index = space_idx, merge_repeated=False)
