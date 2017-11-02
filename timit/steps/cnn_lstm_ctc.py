@@ -14,8 +14,9 @@ import time
 import numpy as np
 import argparse
 import ConfigParser
+import os
 
-def train(model, train_loader, loss_fn, optimizer, print_every=10):
+def train(model, train_loader, loss_fn, optimizer, logger, print_every=20):
     model.train()
     
     total_loss = 0
@@ -55,7 +56,7 @@ def train(model, train_loader, loss_fn, optimizer, print_every=10):
     logger.info("Epoch done, average loss: %.4f" % average_loss)
     return average_loss
 
-def dev(model, dev_loader, decoder):
+def dev(model, dev_loader, decoder, logger):
     model.eval()
     total_cer = 0
     total_tokens = 0
@@ -92,9 +93,9 @@ def init_logger(log_file):
     return logger
 
 RNN = {'nn.LSTM':nn.LSTM, 'nn.GRU': nn.GRU, 'nn.RNN':nn.RNN}
-parser = argparse.ArgumentParser(description='lstm_ctc')
-parser.add_argument('--conf', default='../setting.conf' , help='conf file with Argument of LSTM and training')
-parser.add_argument('--log', default='../log/train_cnn_lstm_ctc.log', help='log file for training')
+parser = argparse.ArgumentParser(description='cnn_)lstm_ctc')
+parser.add_argument('--conf', default='../conf/cnn_lstm_ctc_setting.conf' , help='conf file with Argument of LSTM and training')
+parser.add_argument('--log-dir', dest='log_dir', default='../log', help='log file for training')
 
 def main():
     args = parser.parse_args()
@@ -104,18 +105,19 @@ def main():
     except:
         print("conf file not exists")
     
-    logger = init_logger(args.log)
+    logger = init_logger(os.path.join(args.log_dir, 'train_cnn_lstm_ctc.log'))
     dataset = cf.get('Data', 'dataset')
+    data_dir = cf.get('Data', 'data_dir')
     feature_type = cf.get('Data', 'feature_type')
     out_type = cf.get('Data', 'out_type')
     n_feats = cf.getint('Data', 'n_feats')
     batch_size = cf.getint("Training", 'batch_size')
     
     #Data Loader
-    train_dataset = myDataset(data_set='train', feature_type=feature_type, out_type=out_type, n_feats=n_feats)
+    train_dataset = myDataset(data_dir, data_set='train', feature_type=feature_type, out_type=out_type, n_feats=n_feats)
     train_loader = myCNNDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                         num_workers=4, pin_memory=False)
-    dev_dataset = myDataset(data_set="dev", feature_type=feature_type, out_type=out_type, n_feats=n_feats)
+    dev_dataset = myDataset(data_dir, data_set="dev", feature_type=feature_type, out_type=out_type, n_feats=n_feats)
     dev_loader = myCNNDataLoader(dev_dataset, batch_size=batch_size, shuffle=False,
                         num_workers=4, pin_memory=False)
     
@@ -139,6 +141,17 @@ def main():
     if USE_CUDA:
         model = model.cuda()
     
+    #Training
+    init_lr = cf.getfloat('Training', 'init_lr')
+    num_epoches = cf.getint('Training', 'num_epoches')
+    least_train_epoch = cf.getint('Training', 'least_train_epoch')
+    end_adjust_acc = cf.getfloat('Training', 'end_adjust_acc')
+    decay = cf.getfloat("Training", 'lr_decay')
+    weight_decay = cf.getfloat("Training", 'weight_decay')
+    params = { 'num_epoches':num_epoches, 'least_train_epoch':least_train_epoch, 'end_adjust_acc':end_adjust_acc,
+                'decay':decay, 'learning_rate':init_lr, 'weight_decay':weight_decay, 'batch_size':batch_size,
+                'feature_type':feature_type, 'n_feats': n_feats, 'out_type': out_type }
+    
     loss_fn = CTCLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_lr, weight_decay=weight_decay)
 
@@ -150,17 +163,6 @@ def main():
             dict(title=title+" CER on Train", ylabel = 'CER', xlabel = 'Epoch'),
             dict(title=title+' CER on DEV', ylabel = 'DEV CER', xlabel = 'Epoch')]
     viz_window = [None, None, None]
-    
-    #Training
-    init_lr = cf.getfloat('Training', 'init_lr')
-    num_epoches = cf.getint('Training', 'num_epoches')
-    least_train_epoch = cf.getint('Training', 'least_train_epoch')
-    end_adjust_acc = cf.getfloat('Training', 'end_adjust_acc')
-    decay = cf.getfloat("Training", 'lr_decay')
-    weight_decay = cf.getfloat("Training", 'weight_decay')
-    params = { 'num_epoches':num_epoches, 'least_train_epoch':least_train_epoch, 'end_adjust_acc':end_adjust_acc,
-                'decay':decay, 'learning_rate':init_lr, 'weight_decay':weight_decay, 'batch_size':batch_size,
-                'feature_type':feature_type, 'n_feats': n_feats, 'out_type': out_type }
     
     count = 0
     learning_rate = init_lr
@@ -186,13 +188,13 @@ def main():
         print("Start training epoch: %d, learning_rate: %.5f" % (count, learning_rate))
         logger.info("Start training epoch: %d, learning_rate: %.5f" % (count, learning_rate))
         
-        loss = train(model, train_loader, loss_fn, optimizer, print_every=20)
+        loss = train(model, train_loader, loss_fn, optimizer, logger, print_every=20)
         loss_results.append(loss)
-        cer = dev(model, train_loader, decoder)
+        cer = dev(model, train_loader, decoder, logger)
         print("cer on training set is %.4f" % cer)
         logger.info("cer on training set is %.4f" % cer)
         training_cer_results.append(cer)
-        acc = dev(model, dev_loader, decoder)
+        acc = dev(model, dev_loader, decoder, logger)
         dev_cer_results.append(acc)
         
         model_path_accept = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'.pkl'
@@ -236,7 +238,9 @@ def main():
 
     print("End training, best cv acc is: %.4f" % acc_best)
     logger.info("End training, best cv acc is: %.4f" % acc_best)
-    best_path = './log/best_model'+'_cv'+str(acc_best)+'.pkl'
+    best_path = os.path.join(args.log_dir, 'best_model'+'_cv'+str(acc_best)+'.pkl')
+    cf.set('Model', 'model_file', best_path)
+    cf.write(open(args.conf, 'w'))
     params['epoch']=count
     torch.save(CNN_LSTM_CTC.save_package(model, optimizer=optimizer, epoch=params, loss_results=loss_results, training_cer_results=training_cer_results, dev_cer_results=dev_cer_results), best_path)
 

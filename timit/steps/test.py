@@ -10,13 +10,26 @@ import torch.nn as nn
 from torch.autograd import Variable
 import time
 import argparse
+import ConfigParser
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--conf', help='conf file for training')
+parser.add_argument('--model-path', dest='model_path', help='Model file to decode for test')
 parser.add_argument('--decode-type', dest='decode_type', default='Greedy', help='Decoder for test. GreadyDecoder or Beam search Decoder')
+parser.add_argument('--map-48-39', dest='map_48_39', help='map 48 phones to 39 when test')
 
-def test(model_path):
+def test():
     args = parser.parse_args()
-    package = torch.load(model_path)
+    if args.model_path is not None:
+        package = torch.load(args.model_path)
+        data_dir = '../data_prepare/data'
+    else:
+        cf = ConfigParser.ConfigParser()
+        cf.read(args.conf)
+        model_path = cf.get('Model', 'model_file')
+        data_dir = cf.get('Data', 'data_dir')
+        package = torch.load(model_path)
+    
     input_size = package['input_size']
     layers = package['rnn_layers']
     hidden_size = package['hidden_size']
@@ -32,7 +45,7 @@ def test(model_path):
 
     decoder_type =  args.decode_type
 
-    test_dataset = myDataset(data_set='test', feature_type=feature_type, out_type=out_type, n_feats=n_feats)
+    test_dataset = myDataset(data_dir, data_set='test', feature_type=feature_type, out_type=out_type, n_feats=n_feats)
     
     if model_type == 'CNN_LSTM_CTC':
         model = CNN_LSTM_CTC(rnn_input_size=input_size, rnn_hidden_size=hidden_size, rnn_layers=layers, 
@@ -57,6 +70,12 @@ def test(model_path):
         decoder = BeamDecoder(test_dataset.int2phone, top_paths=1, beam_width=20, blank_index=0, space_idx=-1,
                                 lm_path='./data_prepare/bigram.binary', dict_path='./data_prepare/dict.txt', 
                                 trie_path='./data_prepare/trie', lm_alpha=10, lm_beta1=1, lm_beta2=1)    
+    if args.map_48_39 is not None:
+        import pickle
+        f = open(args.map_48_39, 'rb')
+        map_dict = pickle(f)
+        f.close()
+    print(map_dict)
     total_wer = 0
     total_cer = 0
     total_tokens = 0
@@ -79,7 +98,13 @@ def test(model_path):
         for x in range(len(labels)):
             print("origin: "+ labels[x])
             print("decoded: "+ decoded[x])
-        cer, wer = decoder.phone_word_error(probs, input_size_list, target, target_sizes)
+        cer = 0
+        wer = 0
+        for x in range(len(labels)):
+            cer += decoder.cer(decoded[x], labels[x])
+            wer += decoder.wer(decoded[x], labels[x])
+            decoder.num_word += len(labels[x].split())
+            decoder.num_char += len(labels[x])
         total_cer += cer
         total_wer += wer
     CER = (1 - float(total_cer) / decoder.num_char)*100
@@ -88,5 +113,4 @@ def test(model_path):
     print("Word error rate on test set: %.4f" % WER)
 
 if __name__ == "__main__":
-    test('./log/exp_4lstm_256hidden_5lepoch_fbank40/exp2_77.3112/best_model_cv79.165836488.pkl')
-    #test('./log/best_model_cv77.3925748821.pkl')
+    test()

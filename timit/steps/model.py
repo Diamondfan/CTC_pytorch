@@ -104,12 +104,6 @@ class CTC_RNN(nn.Module):
         self.name = 'CTC_RNN'
         self._drop_out = drop_out
         
-        #d_word_vec = rnn_input_size
-        #n_position = n_max_seq + 1
-        
-        #self.position_enc = nn.Embedding(n_position, d_word_vec, padding_idx=0)
-        #self.position_enc.weight.data = position_encoding_init(n_position, d_word_vec)
-
         rnns = []
         rnn = BatchRNN(input_size=rnn_input_size, hidden_size=rnn_hidden_size, 
                         rnn_type=rnn_type, bidirectional=bidirectional, 
@@ -186,7 +180,7 @@ class CNN_LSTM_CTC(nn.Module):
         self.name = 'CNN_LSTM_CTC'
         
         self.conv = nn.Sequential(
-                nn.Conv2d(1, 16, kernel_size=(11, 21), stride=(2, 2)),
+                nn.Conv2d(1, 16, kernel_size=(11, 5), stride=(2, 2)),
                 nn.BatchNorm2d(16),
                 nn.Hardtanh(0, 20, inplace=True),
                 #nn.Conv2d(32, 32, kernel_size=(11, 21), stride=(1, 2)),
@@ -194,7 +188,7 @@ class CNN_LSTM_CTC(nn.Module):
                 #nn.Hardtanh(0, 20, inplace=True)
                 )
         
-        rnn_input_size = int(math.floor(rnn_input_size-21)/2+1)
+        rnn_input_size = int(math.floor(rnn_input_size-5)/2+1)
         #rnn_input_size = int(math.floor(rnn_input_size-21)/2+1)
         rnn_input_size *= 16
 
