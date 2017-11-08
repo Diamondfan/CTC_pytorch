@@ -73,12 +73,11 @@ def test():
     if args.map_48_39 is not None:
         import pickle
         f = open(args.map_48_39, 'rb')
-        map_dict = pickle(f)
+        map_dict = pickle.load(f)
         f.close()
-    print(map_dict)
+        print(map_dict)
     total_wer = 0
     total_cer = 0
-    total_tokens = 0
     for data in test_loader:
         inputs, target, input_sizes, input_size_list, target_sizes = data 
         if model.name == 'CTC_RNN':
@@ -95,7 +94,20 @@ def test():
         decoded = decoder.decode(probs, input_size_list)
         targets = decoder._unflatten_targets(target, target_sizes)
         labels = decoder._process_strings(decoder._convert_to_strings(targets))
+        if args.map_48_39 is not None:
+            for x in range(len(labels)):
+                label = labels[x].strip().split(' ')
+                for i in range(len(label)):
+                    label[i] = map_dict[label[i]]
+                labels[x] = ' '.join(label)
+                decode = decoded[x].strip().split(' ')
+                for i in range(len(decode)):
+                    decode[i] = map_dict[decode[i]]
+                decoded[x] = ' '.join(decode)
+
         for x in range(len(labels)):
+            #labels[x] = labels[x].strip()
+            #decoded[x] = decoded[x].strip()
             print("origin: "+ labels[x])
             print("decoded: "+ decoded[x])
         cer = 0

@@ -170,6 +170,20 @@ class myDataset(Dataset):
             #print(spect)
             spec_dict[utt] = spect.numpy()
         f.close()
+
+        if self.normalize:
+            i = 0
+            for utt in spec_dict:
+                if i == 0:
+                    spec_all = torch.FloatTensor(spec_dict[utt])
+                else:
+                    spec_all = torch.cat((spec_all, torch.FloatTensor(spec_dict[utt])), 0)
+                i += 1
+            mean = torch.mean(spec_all, 0, True)
+            std = torch.std(spec_all, 0, True)
+            for utt in spec_dict:
+                tmp = torch.add(torch.FloatTensor(spec_dict[utt]), -1, mean)
+                spec_dict[utt] = torch.div(tmp, std).numpy()
         
         if len(spec_dict) != len(label_dict):
             print("%s data: The num of wav and text are not the same!" % self.data_set)
@@ -199,11 +213,6 @@ class myDataset(Dataset):
         spect, phase = librosa.magphase(D)
         spect = np.log1p(spect)
         spect = torch.FloatTensor(spect)
-        if self.normalize:
-            mean = spect.mean()
-            std = spect.std()
-            spect.add_(-mean)
-            spect.div_(std)
         
         return spect.transpose(0,1)
 
@@ -311,7 +320,7 @@ def create_CNN_input(batch):
     return inputs, targets, input_sizes, input_size_list, target_sizes 
 
 if __name__ == '__main__':
-    dev_dataset = myDataset('../data_prepare/data', data_set='test', feature_type="fbank", out_type='phone', n_feats=40)
+    dev_dataset = myDataset('../data_prepare/data', data_set='test', feature_type="spectrum", out_type='phone', n_feats=201)
     dev_loader = myDataLoader(dev_dataset, batch_size=8, shuffle=True, 
                      num_workers=4, pin_memory=False)
     #print(dev_dataset.int2phone)

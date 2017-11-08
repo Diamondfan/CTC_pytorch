@@ -15,6 +15,7 @@ import numpy as np
 import argparse
 import ConfigParser
 import os
+import copy
 
 def train(model, train_loader, loss_fn, optimizer, logger, print_every=20):
     model.train()
@@ -93,7 +94,7 @@ def init_logger(log_file):
     return logger
 
 RNN = {'nn.LSTM':nn.LSTM, 'nn.GRU': nn.GRU, 'nn.RNN':nn.RNN}
-parser = argparse.ArgumentParser(description='cnn_)lstm_ctc')
+parser = argparse.ArgumentParser(description='cnn_lstm_ctc')
 parser.add_argument('--conf', default='../conf/cnn_lstm_ctc_setting.conf' , help='conf file with Argument of LSTM and training')
 parser.add_argument('--log-dir', dest='log_dir', default='../log', help='log file for training')
 
@@ -144,11 +145,10 @@ def main():
     #Training
     init_lr = cf.getfloat('Training', 'init_lr')
     num_epoches = cf.getint('Training', 'num_epoches')
-    least_train_epoch = cf.getint('Training', 'least_train_epoch')
     end_adjust_acc = cf.getfloat('Training', 'end_adjust_acc')
     decay = cf.getfloat("Training", 'lr_decay')
     weight_decay = cf.getfloat("Training", 'weight_decay')
-    params = { 'num_epoches':num_epoches, 'least_train_epoch':least_train_epoch, 'end_adjust_acc':end_adjust_acc,
+    params = { 'num_epoches':num_epoches, 'end_adjust_acc':end_adjust_acc,
                 'decay':decay, 'learning_rate':init_lr, 'weight_decay':weight_decay, 'batch_size':batch_size,
                 'feature_type':feature_type, 'n_feats': n_feats, 'out_type': out_type }
     
@@ -182,6 +182,7 @@ def main():
         
         if adjust_rate_flag:
             learning_rate *= decay
+            adjust_rate_flag = False
             for param in optimizer.param_groups:
                 param['lr'] *= decay
         
@@ -197,37 +198,43 @@ def main():
         acc = dev(model, dev_loader, decoder, logger)
         dev_cer_results.append(acc)
         
-        model_path_accept = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'.pkl'
+        #model_path_accept = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'.pkl'
         #model_path_reject = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'_rejected.pkl'
         
-        if adjust_time == 8:
-            stop_train = True
+        if acc > (acc_best + end_adjust_acc):
+            acc_best = acc
+            adjust_rate_count = 0
+            model_state = copy.deepcopy(model.state_dict())
+            op_state = copy.deepcopy(optimizer.state_dict())
+        elif (acc > acc_best - end_adjust_acc):
+            adjust_rate_count += 1
+            if acc > acc_best and adjust_rate_count == 10:
+                acc_best = acc
+                model_state = copy.deepcopy(model.state_dict())
+                op_state = copy.deepcopy(optimizer.state_dict())
+        else:
+            adjust_rate_count = 0
         
-        ##10轮迭代之后，开始调整学习率
-        if count >= least_train_epoch:
-            if acc > (acc_best + end_adjust_acc):            
-                model_state = model.state_dict()
-                op_state = optimizer.state_dict()
-                adjust_rate_flag = False
-                acc_best = acc
-                #torch.save(model_state, model_path_accept)
-            elif (acc > acc_best):
-                model_state = model.state_dict()
-                op_state = optimizer.state_dict()
-                adjust_rate_flag = True
-                adjust_time += 1
-                acc_best = acc
-                #torch.save(model_state, model_path_accept)
-            elif (acc <= acc_best):
-                adjust_rate_flag = True
-                adjust_time += 1
-                #torch.save(model.state_dict(), model_path_reject)
-                model.load_state_dict(model_state)
-                optimizer.load_state_dict(op_state)
+        #torch.save(model.state_dict(), model_path_reject)
+        print("adjust_rate_count:"+str(adjust_rate_count))
+        print('adjust_time:'+str(adjust_time))
+        logger.info("adjust_rate_count:"+str(adjust_rate_count))
+        logger.info('adjust_time:'+str(adjust_time))
+
+        if adjust_rate_count == 10:
+            adjust_rate_flag = True
+            adjust_time += 1
+            adjust_rate_count = 0
+
+        if adjust_time == 8:
+            model.load_state_dict(model_state)
+            optimizer.load_state_dict(op_state)
+            stop_train = True
         
         time_used = (time.time() - start_time) / 60
         print("epoch %d done, cv acc is: %.4f, time_used: %.4f minutes" % (count, acc, time_used))
         logger.info("epoch %d done, cv acc is: %.4f, time_used: %.4f minutes" % (count, acc, time_used))
+        
         x_axis = range(count)
         y_axis = [loss_results[0:count], training_cer_results[0:count], dev_cer_results[0:count]]
         for x in range(len(viz_window)):
@@ -242,6 +249,7 @@ def main():
     cf.set('Model', 'model_file', best_path)
     cf.write(open(args.conf, 'w'))
     params['epoch']=count
+
     torch.save(CNN_LSTM_CTC.save_package(model, optimizer=optimizer, epoch=params, loss_results=loss_results, training_cer_results=training_cer_results, dev_cer_results=dev_cer_results), best_path)
 
 if __name__ == '__main__':

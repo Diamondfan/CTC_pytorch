@@ -66,12 +66,11 @@ def test():
     if decoder_type == 'Greedy':
         decoder  = GreedyDecoder(test_dataset.int2phone, space_idx=-1, blank_index=0)
     else:
-        decoder = BeamDecoder(test_dataset.int2phone, top_paths=1, beam_width=20, blank_index=0, space_idx=-1,
-                                lm_path='./data_prepare/bigram.binary', dict_path='./data_prepare/dict.txt', 
-                                trie_path='./data_prepare/trie', lm_alpha=10, lm_beta1=1, lm_beta2=1)    
+        decoder = BeamDecoder(test_dataset.int2phone, top_paths=1, beam_width=100, blank_index=0, space_idx=-1,
+                                lm_path=None, dict_path=None, 
+                                trie_path=None, lm_alpha=10, lm_beta1=1, lm_beta2=1)    
     total_wer = 0
     total_cer = 0
-    total_tokens = 0
     for data in test_loader:
         inputs, target, input_sizes, input_size_list, target_sizes = data 
         if model.name == 'CTC_RNN':
@@ -100,8 +99,6 @@ def test():
             decoder.num_char += len(labels[x])
         total_cer += cer
         total_wer += wer
-        total_tokens += sum(target_sizes)
-    print(decoder.num_word, total_tokens)
     CER = (1 - float(total_cer) / decoder.num_char)*100
     WER = (1 - float(total_wer) / decoder.num_word)*100
     print("Character error rate on test set: %.4f" % CER)
