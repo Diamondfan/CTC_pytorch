@@ -1,7 +1,7 @@
 # My system for Speech recogniton
-Start time : 2017.8.24
-Author     : Richardfan
-The END-To-END CTC for speech recognition system using pytorch. Now only phone recognition.
+- Start time : 2017.8.24
+- Author     : Richardfan
+- The END-To-END CTC for speech recognition system using pytorch. Now only phone recognition.
 
 ## Data
 English Corpus: Timit
@@ -45,7 +45,8 @@ The first stide 2 can decrease the frame for the input for RNN, and training bec
 - initial-lr = 0.001
 - decay = 0.5
 - wight-decay = 0.005
-Adjust the learning rate if the dev acc doesn't increase.
+Adjust the learning rate if the dev acc is around a specific acc for ten times.
+Adjust time is set to 8.
 Optimizer is nn.optimizer.Adam with weigth decay 0.0001
 
 ## Decoder:
