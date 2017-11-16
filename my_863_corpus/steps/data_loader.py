@@ -8,34 +8,24 @@ import torch
 import sys
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
-import torchaudio
 import scipy.signal
-import librosa
 import math
-import os
+from utils import parse_audio, process_kaldi_feat, process_label_file, process_map_file, F_Mel
+import utils
 
 windows = {'hamming':scipy.signal.hamming, 'hann':scipy.signal.hann, 'blackman':scipy.signal.blackman,
             'bartlett':scipy.signal.bartlett}
 audio_conf = {"sample_rate":16000, 'window_size':0.025, 'window_stride':0.01, 'window': 'hamming'}
 
-def load_audio(path):
-    sound, _ = torchaudio.load(path)
-    sound = sound.numpy()
-    if len(sound.shape) > 1:
-        if sound.shape[1] == 1:
-            sound = sound.squeeze()
-        else:
-            sound - sound.mean(axis=1)
-    return sound
-
 #Override the class of Dataset
 #Define my own dataset over timit used the feature extracted by kaldi
 class myDataset(Dataset):
-    def __init__(self, data_dir, data_set='train', feature_type='spectrum', out_type='phone', n_feats=39, normalize=True):
+    def __init__(self, data_dir, data_set='train', feature_type='spectrum', out_type='phone', n_feats=39, normalize=True, mel=False):
         self.data_set = data_set
         self.out_type = out_type
         self.feature_type = feature_type
         self.normalize = normalize
+        self.mel = mel
         h5_file = os.path.join(data_dir, feature_type+'_'+out_type+'_tmp', data_set+'.h5py')
         wav_path = os.path.join(data_dir, 'wav_path', data_set+'.wav.scp')
         mfcc_file = os.path.join(data_dir, "feature_"+feature_type, data_set+'.txt')
@@ -61,54 +51,13 @@ class myDataset(Dataset):
     
     def process_txt(self, mfcc_file, label_file, char_file, h5_file):
         #read map file
-        self.char_map = dict()
-        self.int2phone = dict()
-        f = open(char_file, 'r')
-        for line in f.readlines():
-            char, num = line.strip().split(' ')
-            self.char_map[char] = int(num)
-            self.int2phone[int(num)] = char
-        f.close()
-        self.int2phone[0] = '#'
+        self.char_map, self.int2phone = process_map_file(char_file) 
         
-
         #read the label file
-        label_dict = dict()
-        f = open(label_file, 'r')
-        for label in f.readlines():
-            label = label.strip()
-            label_list = []
-            if self.out_type == 'char':
-                utt = label.split('\t', 1)[0]
-                label = label.split('\t', 1)[1]
-                for i in range(len(label)):
-                    if label[i].lower() in self.char_map:
-                        label_list.append(self.char_map[label[i].lower()])
-                    if label[i] == ' ':
-                        label_list.append(28)
-            else:
-                label = label.split()
-                utt = label[0]
-                for i in range(1,len(label)):
-                    label_list.append(self.char_map[label[i]])
-            label_dict[utt] = np.array(label_list)
-        f.close()
+        label_dict = process_label_file(label_file, self.out_type, self.char_map)
         
         #read the mfcc file
-        mfcc_dict = dict()
-        f = open(mfcc_file, 'r')
-        for line in f.readlines():
-            mfcc_frame = list()
-            line = line.strip().split()
-            if len(line) == 2:
-                utt = line[0]
-                mfcc_dict[utt] = list()
-                continue
-            if len(line) > 2:
-                for i in range(self.n_feats):
-                    mfcc_frame.append(float(line[i]))
-            mfcc_dict[utt].append(mfcc_frame)
-        f.close()
+        mfcc_dict = process_kaldi_feat(mfcc_file, self.n_feats)
         
         if len(mfcc_dict) != len(label_dict):
             print("%s data: The num of wav and text are not the same!" % self.data_set)
@@ -129,37 +78,10 @@ class myDataset(Dataset):
             
     def process_audio(self, wav_path, label_file, char_file, h5_file):
         #read map file
-        self.char_map = dict()
-        self.int2phone = dict()
-        f = open(char_file, 'r')
-        for line in f.readlines():
-            char, num = line.strip().split(' ')
-            self.char_map[char] = int(num)
-            self.int2phone[int(num)] = char
-        f.close()
-        self.int2phone[0] = '#'
+        self.char_map, self.int2phone = process_map_file(char_file)
         
         #read the label file
-        label_dict = dict()
-        f = open(label_file, 'r')
-        for label in f.readlines():
-            label = label.strip()
-            label_list = []
-            if self.out_type == 'char':
-                utt = label.split('\t', 1)[0]
-                label = label.split('\t', 1)[1]
-                for i in range(len(label)):
-                    if label[i].lower() in self.char_map:
-                        label_list.append(self.char_map[label[i].lower()])
-                    if label[i] == ' ':
-                        label_list.append(28)
-            else:
-                label = label.split()
-                utt = label[0]
-                for i in range(1,len(label)):
-                    label_list.append(self.char_map[label[i]])
-            label_dict[utt] = np.array(label_list)
-        f.close()
+        label_dict = process_label_file(label_file, self.out_type, self.char_map)
         
         #extract spectrum
         spec_dict = dict()
@@ -233,7 +155,12 @@ class myDataset(Dataset):
         print("Load %d sentences from %s dataset" % (self.__len__(), self.data_set))
 
     def __getitem__(self, idx):
-        return self.features_label[idx]
+        if self.mel:
+            spect, label = self.features_label[idx]
+            spect = F_Mel(spect, audio_conf)
+            return (spect, label)
+        else:
+            return self.features_label[idx]
 
     def __len__(self):
         return len(self.features_label) 
@@ -324,18 +251,3 @@ if __name__ == '__main__':
     dev_loader = myDataLoader(dev_dataset, batch_size=8, shuffle=True, 
                      num_workers=4, pin_memory=False)
     #print(dev_dataset.int2phone)
-    '''
-    max_length = 0
-    for data in dev_loader:
-        inputs = data[0]
-        print(inputs.size())
-        if inputs.size(1) > max_length:
-            max_length = inputs.size(1)
-        print(max_length)
-    '''
-    i = 0
-    for data in dev_loader:
-        if i == 0:
-            inputs, targets, input_size, input_size_list, target_size = data
-            print(inputs)
-            break

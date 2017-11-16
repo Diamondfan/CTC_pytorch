@@ -8,35 +8,24 @@ import torch
 import sys
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
-import torchaudio
 import scipy.signal
-import librosa
 import math
+from utils import parse_audio, process_kaldi_feat, process_label_file, process_map_file, F_Mel
 
 windows = {'hamming':scipy.signal.hamming, 'hann':scipy.signal.hann, 'blackman':scipy.signal.blackman,
             'bartlett':scipy.signal.bartlett}
 audio_conf = {"sample_rate":16000, 'window_size':0.025, 'window_stride':0.01, 'window': 'hamming'}
 
-def load_audio(path):
-    sound, _ = torchaudio.load(path)
-    sound = sound.numpy()
-    if len(sound.shape) > 1:
-        if sound.shape[1] == 1:
-            sound = sound.squeeze()
-        else:
-            sound - sound.mean(axis=1)
-    return sound
-
-data_dir = '/home/fan/pytorch/CTC_pytorch/timit/data_prepare/timit'
 
 #Override the class of Dataset
 #Define my own dataset over timit used the feature extracted by kaldi
 class myDataset(Dataset):
-    def __init__(self, data_set='train', feature_type='spectrum', out_type='phone', n_feats=39, normalize=True):
+    def __init__(self, data_dir, data_set='train', feature_type='spectrum', out_type='phone', n_feats=39, normalize=True, mel=False):
         self.data_set = data_set
         self.out_type = out_type
         self.feature_type = feature_type
         self.normalize = normalize
+        self.mel = mel
         h5_file = os.path.join(data_dir, feature_type+'_'+out_type+'_tmp', data_set+'.h5py')
         wav_path = os.path.join(data_dir, 'wav_path', data_set+'.wav.scp')
         mfcc_file = os.path.join(data_dir, "feature_"+feature_type, data_set+'.txt')
@@ -62,54 +51,13 @@ class myDataset(Dataset):
     
     def process_txt(self, mfcc_file, label_file, char_file, h5_file):
         #read map file
-        self.char_map = dict()
-        self.int2phone = dict()
-        f = open(char_file, 'r')
-        for line in f.readlines():
-            char, num = line.strip().split(' ')
-            self.char_map[char] = int(num)
-            self.int2phone[int(num)] = char
-        f.close()
-        self.int2phone[0] = '#'
+        self.char_map, self.int2phone = process_map_file(char_file)
         
-
         #read the label file
-        label_dict = dict()
-        f = open(label_file, 'r')
-        for label in f.readlines():
-            label = label.strip()
-            label_list = []
-            if self.out_type == 'char':
-                utt = label.split('\t', 1)[0]
-                label = label.split('\t', 1)[1]
-                for i in range(len(label)):
-                    if label[i].lower() in self.char_map:
-                        label_list.append(self.char_map[label[i].lower()])
-                    if label[i] == ' ':
-                        label_list.append(28)
-            else:
-                label = label.split()
-                utt = label[0]
-                for i in range(1,len(label)):
-                    label_list.append(self.char_map[label[i]])
-            label_dict[utt] = np.array(label_list)
-        f.close()
+        label_dict = process_label_file(label_file, self.out_type, self.char_map)
         
         #read the mfcc file
-        mfcc_dict = dict()
-        f = open(mfcc_file, 'r')
-        for line in f.readlines():
-            mfcc_frame = list()
-            line = line.strip().split()
-            if len(line) == 2:
-                utt = line[0]
-                mfcc_dict[utt] = list()
-                continue
-            if len(line) > 2:
-                for i in range(self.n_feats):
-                    mfcc_frame.append(float(line[i]))
-            mfcc_dict[utt].append(mfcc_frame)
-        f.close()
+        mfcc_dict = process_kaldi_feat(mfcc_file, self.n_feats)
         
         if len(mfcc_dict) != len(label_dict):
             print("%s data: The num of wav and text are not the same!" % self.data_set)
@@ -126,56 +74,42 @@ class myDataset(Dataset):
             grp.create_dataset('data', data=np.array(mfcc_dict[utt]))
             grp.create_dataset('label', data=label_dict[utt])
         print("Saved the %s data to h5py file" % self.data_set)
-        #print(self.__getitem__(1))
             
     def process_audio(self, wav_path, label_file, char_file, h5_file):
         #read map file
-        self.char_map = dict()
-        self.int2phone = dict()
-        f = open(char_file, 'r')
-        for line in f.readlines():
-            char, num = line.strip().split(' ')
-            self.char_map[char] = int(num)
-            self.int2phone[int(num)] = char
-        f.close()
-        self.int2phone[0] = '#'
+        self.char_map, self.int2phone = process_map_file(char_file)
         
         #read the label file
-        label_dict = dict()
-        f = open(label_file, 'r')
-        for label in f.readlines():
-            label = label.strip()
-            label_list = []
-            if self.out_type == 'char':
-                utt = label.split('\t', 1)[0]
-                label = label.split('\t', 1)[1]
-                for i in range(len(label)):
-                    if label[i].lower() in self.char_map:
-                        label_list.append(self.char_map[label[i].lower()])
-                    if label[i] == ' ':
-                        label_list.append(28)
-            else:
-                label = label.split()
-                utt = label[0]
-                for i in range(1,len(label)):
-                    label_list.append(self.char_map[label[i]])
-            label_dict[utt] = np.array(label_list)
-        f.close()
+        label_dict = process_label_file(label_file, self.out_type, self.char_map)
         
         #extract spectrum
         spec_dict = dict()
         f = open(wav_path, 'r')
         for line in f.readlines():
             utt, path = line.strip().split()
-            spect = self.parse_audio(path)
+            spect = parse_audio(path, audio_conf, windows)
             #print(spect)
             spec_dict[utt] = spect.numpy()
         f.close()
         
+        if self.normalize:
+            i = 0
+            for utt in spec_dict:
+                if i == 0:
+                    spec_all = torch.FloatTensor(spec_dict[utt])
+                else:
+                    spec_all = torch.cat((spec_all, torch.FloatTensor(spec_dict[utt])), 0)
+                i += 1
+            mean = torch.mean(spec_all, 0, True)
+            std = torch.std(spec_all, 0, True)
+            for utt in spec_dict:
+                tmp = torch.add(torch.FloatTensor(spec_dict[utt]), -1, mean)
+                spec_dict[utt] = torch.div(tmp, std).numpy()
+                
         if len(spec_dict) != len(label_dict):
             print("%s data: The num of wav and text are not the same!" % self.data_set)
             sys.exit(1)
-
+        
         self.features_label = []
         #save the data as h5 file
         f = h5py.File(h5_file, 'w')
@@ -187,26 +121,6 @@ class myDataset(Dataset):
             grp.create_dataset('data', data=spec_dict[utt])
             grp.create_dataset('label', data=label_dict[utt])
         print("Saved the %s data to h5py file" % self.data_set)
-
-    
-    def parse_audio(self, path):
-        y = load_audio(path)
-        n_fft = int(audio_conf['sample_rate']*audio_conf["window_size"])
-        win_length = n_fft
-        hop_length = int(audio_conf['sample_rate']*audio_conf['window_stride'])
-        window = windows[audio_conf['window']]
-        D = librosa.stft(y, n_fft=n_fft, hop_length=hop_length,
-                            win_length=win_length, window=window)
-        spect, phase = librosa.magphase(D)
-        spect = np.log1p(spect)
-        spect = torch.FloatTensor(spect)
-        if self.normalize:
-            mean = spect.mean()
-            std = spect.std()
-            spect.add_(-mean)
-            spect.div_(std)
-        
-        return spect.transpose(0,1)
 
     def load_h5py(self, h5_file):
         self.features_label = []
@@ -225,7 +139,11 @@ class myDataset(Dataset):
         print("Load %d sentences from %s dataset" % (self.__len__(), self.data_set))
 
     def __getitem__(self, idx):
-        return self.features_label[idx]
+        if self.mel:
+            spect, label = self.features_label[idx]
+            return (F_Mel(spect, audio_conf), label)
+        else:
+            return self.features_label[idx]
 
     def __len__(self):
         return len(self.features_label) 
@@ -283,8 +201,8 @@ def create_CNN_input(batch):
         return p[0].size(0)
     
     def change_size(size):
-        size = int(math.floor((size-11)/2)+1)
-        #size = int(math.floor((size-11)/1)+1)
+        size = int(math.floor((size+12-7)/2)+1)
+        size = int(math.floor((size-7)/1)+1)
         return size
 
     #sort batch according to the frame nums
@@ -312,23 +230,16 @@ def create_CNN_input(batch):
     return inputs, targets, input_sizes, input_size_list, target_sizes 
 
 if __name__ == '__main__':
-    dev_dataset = myDataset(data_set='dev', feature_type="spectrum", out_type='phone', n_feats=201)
-    dev_loader = myDataLoader(dev_dataset, batch_size=8, shuffle=True, 
-                     num_workers=4, pin_memory=False)
+    dev_dataset = myDataset('../data_prepare/data', data_set='dev', feature_type="spectrum", out_type='phone', n_feats=201, mel=True)
+    import visdom
+    viz = visdom.Visdom(env='fan')
+    for i in range(1):
+        for j in range(40, 41):
+            show = dev_dataset[i][0].numpy()[j]
+            #print(show)
+            x = range(201)
+            viz.line(X=np.array(x), Y=show)
+        viz.image(dev_dataset[i][0])
+    #viz.image(np.ones((3, 10, 10)))
+    #dev_loader = myDataLoader(dev_dataset, batch_size=8, shuffle=True, num_workers=4, pin_memory=False)
     #print(dev_dataset.int2phone)
-    '''
-    max_length = 0
-    for data in dev_loader:
-        inputs = data[0]
-        print(inputs.size())
-        if inputs.size(1) > max_length:
-            max_length = inputs.size(1)
-        print(max_length)
-    '''
-    i = 0
-    for data in dev_loader:
-        if i == 0:
-            inputs, targets, input_size, input_size_list, target_size, src_pos = data
-            print(inputs)
-            print(src_pos)
-            break
