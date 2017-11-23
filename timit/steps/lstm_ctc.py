@@ -146,8 +146,6 @@ def main():
                         num_class=num_class, drop_out=drop_out)
     #model.apply(xavier_uniform_init)
     print(model.name)
-    if USE_CUDA:
-        model = model.cuda()
     
     #Training
     init_lr = cf.getfloat('Training', 'init_lr')
@@ -155,9 +153,20 @@ def main():
     end_adjust_acc = cf.getfloat('Training', 'end_adjust_acc')
     decay = cf.getfloat("Training", 'lr_decay')
     weight_decay = cf.getfloat("Training", 'weight_decay')
-    params = { 'num_epoches':num_epoches, 'end_adjust_acc':end_adjust_acc,
+    try:
+        seed = cf.getint('Training', 'seed')
+    except:
+        seed = torch.cuda.initial_seed()
+    
+    params = { 'num_epoches':num_epoches, 'end_adjust_acc':end_adjust_acc, 'seed':seed
             'decay':decay, 'learning_rate':init_lr, 'weight_decay':weight_decay, 'batch_size':batch_size,
             'feature_type':feature_type, 'n_feats': n_feats, 'out_type': out_type }
+    
+    if USE_CUDA:
+        torch.cuda.manual_seed(seed)
+        model = model.cuda()
+
+    print(params)
     
     loss_fn = CTCLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_lr, weight_decay=weight_decay)

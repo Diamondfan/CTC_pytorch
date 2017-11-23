@@ -112,13 +112,14 @@ def main():
     feature_type = cf.get('Data', 'feature_type')
     out_type = cf.get('Data', 'out_type')
     n_feats = cf.getint('Data', 'n_feats')
+    mel = cf.getboolean('Data', 'mel')
     batch_size = cf.getint("Training", 'batch_size')
     
     #Data Loader
-    train_dataset = myDataset(data_dir, data_set='train', feature_type=feature_type, out_type=out_type, n_feats=n_feats)
+    train_dataset = myDataset(data_dir, data_set='train', feature_type=feature_type, out_type=out_type, n_feats=n_feats, mel=mel)
     train_loader = myCNNDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                         num_workers=4, pin_memory=False)
-    dev_dataset = myDataset(data_dir, data_set="dev", feature_type=feature_type, out_type=out_type, n_feats=n_feats)
+    dev_dataset = myDataset(data_dir, data_set="dev", feature_type=feature_type, out_type=out_type, n_feats=n_feats, mel=mel)
     dev_loader = myCNNDataLoader(dev_dataset, batch_size=batch_size, shuffle=False,
                         num_workers=4, pin_memory=False)
     
@@ -139,18 +140,25 @@ def main():
                         num_class=num_class, drop_out=drop_out)
     #model.apply(xavier_uniform_init)
     print(model.name)
-    if USE_CUDA:
-        model = model.cuda()
-    
+ 
     #Training
     init_lr = cf.getfloat('Training', 'init_lr')
     num_epoches = cf.getint('Training', 'num_epoches')
     end_adjust_acc = cf.getfloat('Training', 'end_adjust_acc')
     decay = cf.getfloat("Training", 'lr_decay')
     weight_decay = cf.getfloat("Training", 'weight_decay')
-    params = { 'num_epoches':num_epoches, 'end_adjust_acc':end_adjust_acc,
+    try:
+        seed = cf.getint('Training', 'seed')
+    except:
+        seed = torch.cuda.initial_seed()
+    params = { 'num_epoches':num_epoches, 'end_adjust_acc':end_adjust_acc, 'mel': mel, 'seed':seed,
                 'decay':decay, 'learning_rate':init_lr, 'weight_decay':weight_decay, 'batch_size':batch_size,
                 'feature_type':feature_type, 'n_feats': n_feats, 'out_type': out_type }
+    print(params)
+    
+    if USE_CUDA:
+        torch.cuda.manual_seed(seed)
+        model = model.cuda()
     
     loss_fn = CTCLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_lr, weight_decay=weight_decay)
