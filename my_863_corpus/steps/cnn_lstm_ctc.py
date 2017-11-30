@@ -175,6 +175,7 @@ def main():
     count = 0
     learning_rate = init_lr
     acc_best = -100
+    acc_best_true = -100
     adjust_rate_flag = False
     stop_train = False
     adjust_time = 0
@@ -216,8 +217,8 @@ def main():
             op_state = copy.deepcopy(optimizer.state_dict())
         elif (acc > acc_best - end_adjust_acc):
             adjust_rate_count += 1
-            if acc > acc_best and adjust_rate_count == 10:
-                acc_best = acc
+            if acc > acc_best and acc > acc_best_true:
+                acc_best_true = acc
                 model_state = copy.deepcopy(model.state_dict())
                 op_state = copy.deepcopy(optimizer.state_dict())
         else:
@@ -232,10 +233,11 @@ def main():
             adjust_rate_flag = True
             adjust_time += 1
             adjust_rate_count = 0
-
-        if adjust_time == 8:
+            acc_best = acc_best_true
             model.load_state_dict(model_state)
             optimizer.load_state_dict(op_state)
+        
+        if adjust_time == 8:    
             stop_train = True   
         
         time_used = (time.time() - start_time) / 60
