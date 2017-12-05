@@ -11,20 +11,17 @@ English Corpus: Timit
 
 Chinese Corpus: 863 Corpus
 - Training set:  
-  M50		F50		A1-A521  
-                AW1-AW129		650 sentences  
-  M54		F54		B522-B1040  
-				BW130-BW259		649 sentences  
-  M60		F60		C1041-C1560  
-				CW260-CW388  		649 sentences  
-  M64		F64		D1-D625         	625 sentences  
+  M50       F50	    A1-A521      AW1-AW129      650 sentences  
+  M54       F54	    B522-B1040   BW130-BW259    649 sentences  
+  M60       F60	    C1041-C1560  CW260-CW388    649 sentences  
+  M64       F64	    D1-D625                     625 sentences  
   Total:5146 sentences  
 
 - Test set:  
-  M51		F51		A1-A100			100 sentences  
-  M55		F55		B522-B521		100 sentences  
-  M61		F61		C1041-C1140		100 sentences  
-  M63		F63		D1-D100         	100 sentences  
+  M51       F51     A1-A100         100 sentences  
+  M55       F55     B522-B521       100 sentences  
+  M61       F61     C1041-C1140     100 sentences  
+  M63       F63     D1-D100         100 sentences  
   Total:800 sentences
 
 ## Data Prepare:
@@ -43,7 +40,7 @@ This part is to calculate the CTC-Loss.
 ## Model part:
 - RNN + DNN + CTC :  
     Training process is in the file steps/lstm_ctc.py
-- CNN + RNN + DNN + CTC
+- CNN + RNN + DNN + CTC  
     Training process is in the file steps/cnn_lstm_ctc.py
 
 ## Training:
@@ -67,6 +64,6 @@ Beamsearch can improve about 0.2% of phonome accuracy.
 The same as training part with decoder but the CTC loss
 
 ## ToDo:
-Get better model for speech recognition
-Combine with LM
-Beam search with word-level LM
+Get better model for speech recognition  
+Combine with LM  
+Beam search with word-level LM  
