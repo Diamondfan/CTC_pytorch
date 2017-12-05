@@ -10,6 +10,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 import time
 import argparse
+import sys
 import ConfigParser
 
 parser = argparse.ArgumentParser()
@@ -17,6 +18,7 @@ parser.add_argument('--conf', help='conf file for training')
 parser.add_argument('--model-path', dest='model_path', help='Model file to decode for test')
 parser.add_argument('--decode-type', dest='decode_type', default='Greedy', help='Decoder for test. GreadyDecoder or Beam search Decoder')
 parser.add_argument('--map-48-39', dest='map_48_39', help='map 48 phones to 39 when test')
+parser.add_argument('--data-set', dest='data_set', default='test', help='data set to test')
 
 def test():
     args = parser.parse_args()
@@ -40,12 +42,16 @@ def test():
     out_type = package['epoch']['out_type']
     model_type = package['name']
     drop_out = package['_drop_out']
+    try:
+        mel = package['epoch']['mel']
+    except:
+        mel = False
     #weight_decay = package['epoch']['weight_decay']
     #print(weight_decay)
 
     decoder_type =  args.decode_type
 
-    test_dataset = myDataset(data_dir, data_set='test', feature_type=feature_type, out_type=out_type, n_feats=n_feats)
+    test_dataset = myDataset(data_dir, data_set=args.data_set, feature_type=feature_type, out_type=out_type, n_feats=n_feats, mel=mel)
     
     if model_type == 'CNN_LSTM_CTC':
         model = CNN_LSTM_CTC(rnn_input_size=input_size, rnn_hidden_size=hidden_size, rnn_layers=layers, 
@@ -67,17 +73,18 @@ def test():
     if decoder_type == 'Greedy':
         decoder  = GreedyDecoder(test_dataset.int2phone, space_idx=-1, blank_index=0)
     else:
-        decoder = BeamDecoder(test_dataset.int2phone, top_paths=1, beam_width=20, blank_index=0, space_idx=-1,
-                                lm_path='./data_prepare/bigram.binary', dict_path='./data_prepare/dict.txt', 
-                                trie_path='./data_prepare/trie', lm_alpha=10, lm_beta1=1, lm_beta2=1)    
+        decoder = BeamDecoder(test_dataset.int2phone, beam_width=20, blank_index=0, space_idx=-1, lm_path=None)    
+    
     if args.map_48_39 is not None:
         import pickle
         f = open(args.map_48_39, 'rb')
         map_dict = pickle.load(f)
         f.close()
         print(map_dict)
+    
     total_wer = 0
     total_cer = 0
+    start = time.time()
     for data in test_loader:
         inputs, target, input_sizes, input_size_list, target_sizes = data 
         if model.name == 'CTC_RNN':
@@ -106,8 +113,6 @@ def test():
                 decoded[x] = ' '.join(decode)
 
         for x in range(len(labels)):
-            #labels[x] = labels[x].strip()
-            #decoded[x] = decoded[x].strip()
             print("origin: "+ labels[x])
             print("decoded: "+ decoded[x])
         cer = 0
@@ -123,6 +128,9 @@ def test():
     WER = (1 - float(total_wer) / decoder.num_word)*100
     print("Character error rate on test set: %.4f" % CER)
     print("Word error rate on test set: %.4f" % WER)
+    end = time.time()
+    time_used = (end - start) / 60.0
+    print("time used: %.4f" % time_used )
 
 if __name__ == "__main__":
     test()

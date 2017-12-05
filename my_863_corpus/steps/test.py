@@ -10,7 +10,11 @@ import torch.nn as nn
 from torch.autograd import Variable
 import time
 import argparse
-import ConfigParser
+import sys
+if sys.version[0] == '2':
+    import ConfigParser
+else:
+    import configparser
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--conf', help='conf file for training')
@@ -66,11 +70,12 @@ def test():
     if decoder_type == 'Greedy':
         decoder  = GreedyDecoder(test_dataset.int2phone, space_idx=-1, blank_index=0)
     else:
-        decoder = BeamDecoder(test_dataset.int2phone, top_paths=1, beam_width=100, blank_index=0, space_idx=-1,
-                                lm_path=None, dict_path=None, 
-                                trie_path=None, lm_alpha=10, lm_beta1=1, lm_beta2=1)    
+        decoder = BeamDecoder(test_dataset.int2phone, top_paths=40, beam_width=20, blank_index=0, space_idx=-1,
+                                lm_path=None, lm_alpha=0.8, lm_beta=1, cutoff_prob=1.0, dic=test_dataset.phone_word)    
+
     total_wer = 0
     total_cer = 0
+    start = time.time()
     for data in test_loader:
         inputs, target, input_sizes, input_size_list, target_sizes = data 
         if model.name == 'CTC_RNN':
@@ -83,8 +88,10 @@ def test():
             inputs = nn.utils.rnn.pack_padded_sequence(inputs, input_size_list)
         probs = model(inputs)
         probs = probs.data.cpu()
+        #print(probs)
         
         decoded = decoder.decode(probs, input_size_list)
+        
         targets = decoder._unflatten_targets(target, target_sizes)
         labels = decoder._process_strings(decoder._convert_to_strings(targets))
         for x in range(len(labels)):
@@ -103,6 +110,9 @@ def test():
     WER = (1 - float(total_wer) / decoder.num_word)*100
     print("Character error rate on test set: %.4f" % CER)
     print("Word error rate on test set: %.4f" % WER)
+    end = time.time()
+    time_used = (end - start) / 60.0
+    print("Time used for decoding %d sentences: %.4f minutes" % (len(test_dataset), time_used))
 
 if __name__ == "__main__":
     test()
