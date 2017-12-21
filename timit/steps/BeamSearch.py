@@ -31,9 +31,10 @@ class BeamState:
 	return [x.y for x in s]
 
 class ctcBeamSearch(object):
-    def __init__(self, classes, beam_width, lm, blank_index=0):	
+    def __init__(self, classes, beam_width, lm, lm_alpha=0.01, blank_index=0):	
         self.classes = classes
         self.beamWidth = beam_width
+        self.lm_alpha = lm_alpha
         self.lm = lm
         self.blank_index = blank_index
         
@@ -43,10 +44,9 @@ class ctcBeamSearch(object):
         # language model (char bigrams)
         bigramProb=1
         if self.lm:
-	    c1=self.classes[y[-1] if len(y) else self.classes.index(' ')]
+	    c1=self.classes[y[-1]] if len(y) else ' '
 	    c2=self.classes[k]
-	    lmFactor=0.01 # controls influence of language model
-	    bigramProb=self.lm.getCharBigram(c1,c2)**lmFactor
+            bigramProb=self.lm.getCharBigram(c1,c2)**self.lm_alpha
 
         # optical model (RNN)
         if len(y) and y[-1]==k:

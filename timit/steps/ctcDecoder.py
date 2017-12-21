@@ -135,18 +135,18 @@ class GreedyDecoder(Decoder):
 
 
 class BeamDecoder(Decoder):
-    def __init__(self, int2char, beam_width = 200, blank_index = 0, space_idx = -1, lm_path=None):
+    def __init__(self, int2char, beam_width = 200, blank_index = 0, space_idx = -1, lm_path=None, lm_alpha=0.01):
         self.beam_width = beam_width
-        self.top_n = top_paths
         self.labels = ['#']
         for digit in int2char:
             if digit != 0:
                 self.labels.append(int2char[digit])
-        super(BeamDecoder, self).__init__(int2phone, space_idx=space_idx, blank_index=blank_index)
+        super(BeamDecoder, self).__init__(int2char, space_idx=space_idx, blank_index=blank_index)
 
         import BeamSearch
-        #Todo: Add phoneme-level languange model
-        self._decoder = BeamSearch.ctcBeamSearch(self.labels, beam_width, None, blank_index = blank_index)
+        import LanguangModel
+        lm = LanguangModel.LanguageModel(lm_path)
+        self._decoder = BeamSearch.ctcBeamSearch(self.labels, beam_width, lm, lm_alpha=lm_alpha, blank_index = blank_index)
 
     def decode(self, prob_tensor, frame_seq_len=None):
         probs = prob_tensor.transpose(0, 1)
