@@ -17,6 +17,11 @@ import ConfigParser
 import os
 import copy
 
+RNN = {'nn.LSTM':nn.LSTM, 'nn.GRU': nn.GRU, 'nn.RNN':nn.RNN}
+parser = argparse.ArgumentParser(description='cnn_lstm_ctc')
+parser.add_argument('--conf', default='../conf/cnn_lstm_ctc_setting.conf' , help='conf file with Argument of LSTM and training')
+parser.add_argument('--log-dir', dest='log_dir', default='../log', help='log file for training')
+
 def train(model, train_loader, loss_fn, optimizer, logger, print_every=20):
     model.train()
     
@@ -57,29 +62,44 @@ def train(model, train_loader, loss_fn, optimizer, logger, print_every=20):
     logger.info("Epoch done, average loss: %.4f" % average_loss)
     return average_loss
 
-def dev(model, dev_loader, decoder, logger):
+def dev(model, dev_loader, loss_fn, decoder, logger):
     model.eval()
     total_cer = 0
     total_tokens = 0
+    total_loss = 0
+    i = 0
 
     for data in dev_loader:
-        inputs, targets, input_sizes, input_sizes_list, target_sizes =data
-        batch_size = inputs.size(1)
+        inputs, targets, input_sizes, input_sizes_list, target_sizes = data
+        batch_size = inputs.size(0)
         
-        inputs = Variable(inputs, volatile=True, requires_grad=False)
-        
+        inputs = Variable(inputs, requires_grad=False)
+        targets = Variable(targets, requires_grad=False)
+        input_sizes = Variable(input_sizes, requires_grad=False)
+        target_sizes = Variable(target_sizes, requires_grad=False)
+
         if USE_CUDA:
             inputs = inputs.cuda()
         
-        probs = model(inputs)
+        out, probs = model(inputs, dev=True)
+        
+        loss = loss_fn(out, targets, input_sizes, target_sizes)
+        loss /= batch_size
+        total_loss += loss.data[0]
+        
         probs = probs.data.cpu()
+        targets = targets.data
+        target_sizes = target_sizes.data
         if decoder.space_idx == -1:
             total_cer += decoder.phone_word_error(probs, input_sizes_list, targets, target_sizes)[1]
         else:
             total_cer += decoder.phone_word_error(probs, input_sizes_list, targets, target_sizes)[0]
         total_tokens += sum(target_sizes)
+        i += 1
+    #print(total_cer, total_tokens)
     acc = 1 - float(total_cer) / total_tokens
-    return acc*100
+    average_loss = total_loss / i
+    return acc*100, average_loss
 
 def init_logger(log_file):
     import logging
@@ -92,11 +112,6 @@ def init_logger(log_file):
     logger.addHandler(hdl)
     logger.setLevel(logging.DEBUG)
     return logger
-
-RNN = {'nn.LSTM':nn.LSTM, 'nn.GRU': nn.GRU, 'nn.RNN':nn.RNN}
-parser = argparse.ArgumentParser(description='cnn_lstm_ctc')
-parser.add_argument('--conf', default='../conf/cnn_lstm_ctc_setting.conf' , help='conf file with Argument of LSTM and training')
-parser.add_argument('--log-dir', dest='log_dir', default='../log', help='log file for training')
 
 def main():
     args = parser.parse_args()
@@ -168,20 +183,22 @@ def main():
     viz = Visdom()
     title = dataset+' '+feature_type+str(n_feats)+' CNN_LSTM_CTC'
     opts = [dict(title=title+" Loss", ylabel = 'Loss', xlabel = 'Epoch'),
-            dict(title=title+" CER on Train", ylabel = 'CER', xlabel = 'Epoch'),
+            dict(title=title+" Loss on Dev", ylabel = 'DEV Loss', xlabel = 'Epoch'),
             dict(title=title+' CER on DEV', ylabel = 'DEV CER', xlabel = 'Epoch')]
     viz_window = [None, None, None]
     
     count = 0
     learning_rate = init_lr
-    acc_best = -100
-    acc_best_true = -100
+    loss_best = 1000
+    loss_best_true = 1000
     adjust_rate_flag = False
     stop_train = False
     adjust_time = 0
+    acc_best = 0
+    acc_best_true = 0
     start_time = time.time()
     loss_results = []
-    training_cer_results = []
+    dev_loss_results = []
     dev_cer_results = []
     
     while not stop_train:
@@ -200,31 +217,51 @@ def main():
         
         loss = train(model, train_loader, loss_fn, optimizer, logger, print_every=20)
         loss_results.append(loss)
-        cer = dev(model, train_loader, decoder, logger)
-        print("cer on training set is %.4f" % cer)
-        logger.info("cer on training set is %.4f" % cer)
-        training_cer_results.append(cer)
-        acc = dev(model, dev_loader, decoder, logger)
+        acc, dev_loss = dev(model, dev_loader, loss_fn, decoder, logger)
+        print("loss on dev set is %.4f" % dev_loss)
+        logger.info("loss on dev set is %.4f" % dev_loss)
+        dev_loss_results.append(dev_loss)
         dev_cer_results.append(acc)
         
         #model_path_accept = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'.pkl'
         #model_path_reject = './log/epoch'+str(count)+'_lr'+str(learning_rate)+'_cv'+str(acc)+'_rejected.pkl'
-        
+        '''
+        #adjust learning rate by dev_loss
+        if dev_loss < (loss_best - end_adjust_acc):
+            loss_best = dev_loss
+            acc_best = acc
+            adjust_rate_count = 0
+            model_state = copy.deepcopy(model.state_dict())
+            op_state = copy.deepcopy(optimizer.state_dict())
+        elif (dev_loss < loss_best + end_adjust_acc):
+            adjust_rate_count += 1
+            if dev_loss < loss_best and dev_loss < loss_best_true:
+                loss_best_true = dev_loss
+                acc_best = acc
+                model_state = copy.deepcopy(model.state_dict())
+                op_state = copy.deepcopy(optimizer.state_dict())
+        else:
+            adjust_rate_count = 10
+        '''
+        #adjust learning rate by dev_acc
         if acc > (acc_best + end_adjust_acc):
             acc_best = acc
             adjust_rate_count = 0
+            loss_best = dev_loss
             model_state = copy.deepcopy(model.state_dict())
             op_state = copy.deepcopy(optimizer.state_dict())
         elif (acc > acc_best - end_adjust_acc):
             adjust_rate_count += 1
             if acc > acc_best and acc > acc_best_true:
                 acc_best_true = acc
+                loss_best = dev_loss
                 model_state = copy.deepcopy(model.state_dict())
                 op_state = copy.deepcopy(optimizer.state_dict())
         else:
             adjust_rate_count = 0
-        
         #torch.save(model.state_dict(), model_path_reject)
+        
+
         print("adjust_rate_count:"+str(adjust_rate_count))
         print('adjust_time:'+str(adjust_time))
         logger.info("adjust_rate_count:"+str(adjust_rate_count))
@@ -234,7 +271,10 @@ def main():
             adjust_rate_flag = True
             adjust_time += 1
             adjust_rate_count = 0
-            acc_best = acc_best_true
+            #if loss_best > loss_best_true:
+            #    loss_best = loss_best_true
+            if acc_best < acc_best_true:
+                acc_best = acc_best_true
             model.load_state_dict(model_state)
             optimizer.load_state_dict(op_state)
 
@@ -246,21 +286,21 @@ def main():
         logger.info("epoch %d done, cv acc is: %.4f, time_used: %.4f minutes" % (count, acc, time_used))
         
         x_axis = range(count)
-        y_axis = [loss_results[0:count], training_cer_results[0:count], dev_cer_results[0:count]]
+        y_axis = [loss_results[0:count], dev_loss_results[0:count], dev_cer_results[0:count]]
         for x in range(len(viz_window)):
             if viz_window[x] is None:
                 viz_window[x] = viz.line(X = np.array(x_axis), Y = np.array(y_axis[x]), opts = opts[x],)
             else:
                 viz.line(X = np.array(x_axis), Y = np.array(y_axis[x]), win = viz_window[x], update = 'replace',)
 
-    print("End training, best cv acc is: %.4f" % acc_best)
-    logger.info("End training, best cv acc is: %.4f" % acc_best)
+    print("End training, best cv loss is: %.4f, acc is: %.4f" % (loss_best, acc_best))
+    logger.info("End training, best loss acc is: %.4f, acc is: %.4f" % (loss_best, acc_best)) 
     best_path = os.path.join(args.log_dir, 'best_model'+'_cv'+str(acc_best)+'.pkl')
     cf.set('Model', 'model_file', best_path)
     cf.write(open(args.conf, 'w'))
     params['epoch']=count
 
-    torch.save(CNN_LSTM_CTC.save_package(model, optimizer=optimizer, epoch=params, loss_results=loss_results, training_cer_results=training_cer_results, dev_cer_results=dev_cer_results), best_path)
+    torch.save(CNN_LSTM_CTC.save_package(model, optimizer=optimizer, epoch=params, loss_results=loss_results, dev_loss_results=dev_loss_results, dev_cer_results=dev_cer_results), best_path)
 
 if __name__ == '__main__':
     main()

@@ -67,7 +67,7 @@ class InferenceBatchLogSoftmax(nn.Module):
 
         if not self.training:
             seq_len = x.size()[0]
-            return torch.stack([F.log_softmax(x[i]) for i in range(seq_len)], 0)
+            return torch.stack([F.softmax(x[i]) for i in range(seq_len)], 0)
         else:
             return x
 
@@ -179,18 +179,98 @@ class CNN_LSTM_CTC(nn.Module):
         self._drop_out = drop_out
         self.name = 'CNN_LSTM_CTC'
         
+
+        #exp1 3*3 kernal_size to extract phone state and phon features
+        '''
         self.conv = nn.Sequential(
-                nn.Conv2d(1, 16, kernel_size=(11, 5), stride=(2, 1)),
-                nn.BatchNorm2d(16),
+                nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),             #音素三状态的检测
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d((3,3), stride=(1, 1), padding=(1, 1)),
+                nn.Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),            #音素的检测
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
+                )
+        '''
+        '''
+        #exp2 time dim 11 考虑一个音素大概时间为11帧，频率上考虑41维  deepspeech卷积层
+        self.conv = nn.Sequential(
+                nn.Conv2d(1, 32, kernel_size=(11, 41), stride=(2, 2), padding=(10, 0)), 
+                nn.BatchNorm2d(32),
                 nn.Hardtanh(0, 20, inplace=True),
-                #nn.Conv2d(32, 32, kernel_size=(11, 21), stride=(1, 2)),
-                #nn.BatchNorm2d(32),
-                #nn.Hardtanh(0, 20, inplace=True)
+                #nn.MaxPool2d((3,3), stride=(1, 1), padding=(1, 1)),
+                nn.Conv2d(32, 32, kernel_size=(11, 21), stride=(1, 2), ),   
+                nn.BatchNorm2d(32),
+                nn.Hardtanh(0, 20, inplace=True),
+                #nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
+                )
+        '''
+        
+        #exp3 其他有可能的卷积核设计
+        self.conv = nn.Sequential(
+                nn.Conv2d(1, 32, kernel_size=(5, 41), stride=(2, 2), ), 
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                #nn.MaxPool2d((1, 3), stride=(1, 1), padding=(0, 1)),
+                nn.Conv2d(32, 32, kernel_size=(5, 21), stride=(1, 2), ),
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                #nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
                 )
         
-        rnn_input_size = int(math.floor(rnn_input_size-5)+1)
-        #rnn_input_size = int(math.floor(rnn_input_size-21)/2+1)
-        rnn_input_size *= 16
+        '''
+        #exp best one, 第一层增加maxpooling之后效果差不多
+        self.conv = nn.Sequential(
+                nn.Conv2d(1, 32, kernel_size=(3, 41), stride=(2, 2), ), 
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                #nn.MaxPool2d((3,3), stride=(3, 3), padding=(1, 1)),
+                nn.Conv2d(32, 32, kernel_size=(3, 21), stride=(1, 2), ),
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                #nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
+                )
+        '''
+        '''
+        #exp 多个cnn进行组合，分别使用不同的卷积核
+        self.conv = nn.Sequential(
+                nn.Conv2d(1, 32, kernel_size=(3, 21), stride=(2, 2), padding=(2, 0)), 
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                #nn.MaxPool2d((3,3), stride=(1, 1), padding=(1, 1)),
+                nn.Conv2d(32, 32, kernel_size=(3, 11), stride=(1, 2), ),
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                #nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
+                )
+
+        self.conv2 = nn.Sequential(
+                nn.Conv2d(1, 32, kernel_size=(3, 41), stride=(2, 2), padding=(2, 10)), 
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                #nn.MaxPool2d((3,3), stride=(1, 1), padding=(1, 1)),
+                nn.Conv2d(32, 32, kernel_size=(3, 21), stride=(1, 2), padding=(0, 5)),
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                #nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
+                )
+        
+        self.conv3 = nn.Sequential(
+                nn.Conv2d(1, 32, kernel_size=(3, 31), stride=(2, 2), padding=(2, 5)), 
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                #nn.MaxPool2d((3,3), stride=(1, 1), padding=(1, 1)),
+                nn.Conv2d(32, 32, kernel_size=(3, 17), stride=(1, 2), padding=(0, 3)),
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                #nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
+                )
+        '''
+        
+        rnn_input_size = int(math.floor((rnn_input_size-41)/2)+1)
+        rnn_input_size = int(math.floor((rnn_input_size-21)/2)+1)
+        rnn_input_size *= 32
 
         rnns = []
         rnn = BatchRNN(input_size=rnn_input_size, hidden_size=rnn_hidden_size, 
@@ -215,26 +295,48 @@ class CNN_LSTM_CTC(nn.Module):
         self.fc = SequenceWise(fc)
         self.inference_log_softmax = InferenceBatchLogSoftmax()
     
-    def forward(self, x):
+    def forward(self, x, visualize=None, dev=False):
         #x: batch_size * 1 * max_seq_length * feat_size
-        x = self.conv(x)
+        if visualize:
+            visual = [x]
+
+        #print(x)
+        if visualize:
+            i = 0
+            for module in self.conv.children():
+                x = module(x)
+                if i+1 % 3 ==0:
+                    visual.append(x)
+                i += 1
+            visual.append(x)
+        else:
+            x = self.conv(x)
+            #x = torch.cat((self.conv(x), self.conv2(x), self.conv3(x)), dim=1)
+
         x = x.transpose(2, 3).contiguous()
         sizes = x.size()
 
         x = x.view(sizes[0], sizes[1]*sizes[2], sizes[3])
         x = x.transpose(1,2).transpose(0,1).contiguous()
         
+        if visualize:
+            visual.append(x)
         x = self.rnns(x)
         #print(x)
         
         x = self.fc(x)
 
-        x = self.inference_log_softmax(x)
-
-        return x
+        out = self.inference_log_softmax(x)
+        if visualize:
+            visual.append(out)
+            return out, visual
+        if dev:
+            return x, out
+        
+        return out
 
     @staticmethod
-    def save_package(model, optimizer=None, decoder=None, epoch=None, loss_results=None, training_cer_results=None, dev_cer_results=None):
+    def save_package(model, optimizer=None, decoder=None, epoch=None, loss_results=None, dev_loss_results=None, dev_cer_results=None):
         package = {
                 'input_size': model.rnn_input_size,
                 'hidden_size': model.rnn_hidden_size,
@@ -254,7 +356,7 @@ class CNN_LSTM_CTC(nn.Module):
             package['epoch'] = epoch
         if loss_results is not None:
             package['loss_results'] = loss_results
-            package['training_cer_results'] = training_cer_results
+            package['dev_loss_results'] = dev_loss_results
             package['dev_cer_results'] = dev_cer_results
         return package
 
