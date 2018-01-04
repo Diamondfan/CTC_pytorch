@@ -25,7 +25,7 @@ def load_audio(path):
             sound - sound.mean(axis=1)
     return sound
 
-def parse_audio(path, audio_conf, windows):
+def parse_audio(path, audio_conf, windows, normalize=False):
     '''
     Input:
         path       : string 导入音频的路径
@@ -42,9 +42,20 @@ def parse_audio(path, audio_conf, windows):
     #D = librosa.cqt(y, sr=audio_conf['sample_rate'])
     D = librosa.stft(y, n_fft=n_fft, hop_length=hop_length,
                         win_length=win_length, window=window)
-    spect, phase = librosa.magphase(D)
-    spect = np.log1p(spect)
+    spect, phase = librosa.magphase(D) 
+    
     spect = torch.FloatTensor(spect)
+    spect = spect.log1p()
+    
+    if normalize:
+        #mean = math.sqrt(torch.mul(spect, spect).max())
+        #std = math.sqrt(torch.mul(spect, spect).std())
+        mean = spect.mean()
+        #max_spect = spect.max()
+        #min_spect = spect.min()
+        std = spect.std()
+        spect.add_(-mean)
+        spect.div_(std)
     
     return spect.transpose(0,1)
 
@@ -152,7 +163,12 @@ if __name__ == '__main__':
             'bartlett':scipy.signal.bartlett}
     audio_conf = {"sample_rate":16000, 'window_size':0.025, 'window_stride':0.01, 'window': 'hamming'} 
     path = '/home/fan/Audio_data/TIMIT/train/dr1/fcjf0/sa1.wav'
-    spect = parse_audio(path, audio_conf, windows)
-    mel_f = F_Mel(spect, audio_conf)
-    print(spect)
-    print(mel_f)
+    spect = parse_audio(path, audio_conf, windows, normalize=True)
+    mel_f = parse_audio(path, audio_conf, windows, normalize=False)
+    #mel_f = F_Mel(spect, audio_conf)
+    import visdom
+    viz = visdom.Visdom(env='fan')
+    viz.heatmap(spect.transpose(0, 1))
+    viz.heatmap(mel_f.transpose(0, 1))
+    #print(F_Mel(spect, audio_conf))
+    #print(mel_f)

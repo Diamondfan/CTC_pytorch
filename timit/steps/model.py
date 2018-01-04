@@ -11,28 +11,8 @@ from collections import OrderedDict
 __author__ = "Richardfan"
 
 support_rnn = {'lstm': nn.LSTM, 'rnn': nn.RNN, 'gru': nn.GRU}
+support_activation = {"relu": nn.ReLU, "tanh":nn.Tanh, "sigmoid":nn.Sigmoid}
 USE_CUDA = True
-
-def position_encoding_init(n_position, d_pos_vec):
-    position_enc = np.array([
-        [pos / np.power(10000, 2*i / d_pos_vec) for i in range(d_pos_vec)]
-        if pos !=0 else np.zeros(d_pos_vec) for pos in range(n_position)]
-        )
-
-    position_enc[1:, 0::2] = np.sin(position_enc[1:, 0::2])  #dim 2i
-    position_enc[1:, 1::2] = np.cos(position_enc[1:, 1::2])  #dim 2i+1
-    return torch.from_numpy(position_enc).type(torch.FloatTensor)
-
-class Encoder(nn.Module):
-    def __init__(self, n_position, d_word_vec=512):
-        super(Encoder, self).__init__()
-        self.position_enc = nn.Embedding(n_position, d_word_vec, padding_idx=0)
-        self.position_enc.weight.data = position_encoding_init(n_position, d_word_vec)
-
-    def forward(self, src_pos):
-        enc_input = self.position_enc(src_pos)
-
-        return enc_input
 
 class SequenceWise(nn.Module):
     def __init__(self, module):
@@ -40,6 +20,11 @@ class SequenceWise(nn.Module):
         self.module = module
 
     def forward(self, x):
+        '''
+        two kinds of inputs: 
+            when add cnn, the inputs are regular matrix
+            when only use lstm, the inputs are PackedSequence
+        '''
         try:
             x, batch_size_len = x.data, x.batch_sizes
             #print(x)
@@ -61,19 +46,25 @@ class SequenceWise(nn.Module):
         tmpstr += ')'
         return tmpstr
 
-class InferenceBatchLogSoftmax(nn.Module):
+class BatchSoftmax(nn.Module):
+    '''
+    The layer to add softmax for a sequence, which is the output of rnn
+    Which state use its own softmax, and concat the result
+    '''
     def forward(self, x):
         #x:    seq_len * batch_size * num
-
         if not self.training:
             seq_len = x.size()[0]
-            return torch.stack([F.softmax(x[i]) for i in range(seq_len)], 0)
+            return torch.stack([F.softmax(x[i], dim=1) for i in range(seq_len)], 0)
         else:
             return x
 
 class BatchRNN(nn.Module):
+    """
+    Add BatchNorm before rnn to generate a batchrnn layer
+    """
     def __init__(self, input_size, hidden_size, rnn_type=nn.LSTM, 
-            bidirectional=False, batch_norm=True, dropout = 0.1):
+            bidirectional=False, batch_norm=True, dropout=0.1):
         super(BatchRNN, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -88,193 +79,88 @@ class BatchRNN(nn.Module):
         x, _ = self.rnn(x)
         self.rnn.flatten_parameters()
         return x
-    
 
-class CTC_RNN(nn.Module):
-    def __init__(self, rnn_input_size=40, rnn_hidden_size=768, rnn_layers=5,
-            rnn_type=nn.LSTM, bidirectional=True, 
-            batch_norm=True, num_class=28, drop_out = 0.1):
-        super(CTC_RNN, self).__init__()
-        self.rnn_input_size = rnn_input_size
-        self.rnn_hidden_size = rnn_hidden_size
-        self.rnn_layers = rnn_layers
-        self.rnn_type = rnn_type
-        self.num_class = num_class
-        self.num_directions = 2 if bidirectional else 1
-        self.name = 'CTC_RNN'
-        self._drop_out = drop_out
-        
-        rnns = []
-        rnn = BatchRNN(input_size=rnn_input_size, hidden_size=rnn_hidden_size, 
-                        rnn_type=rnn_type, bidirectional=bidirectional, 
-                        batch_norm=False)
-        rnns.append(('0', rnn))
-        for i in range(rnn_layers-1):
-            rnn = BatchRNN(input_size=self.num_directions*rnn_hidden_size, 
-                    hidden_size=rnn_hidden_size, rnn_type=rnn_type, 
-                    bidirectional=bidirectional, dropout=drop_out, batch_norm=batch_norm)
-            rnns.append(('%d' % (i+1), rnn))
-
-        self.rnns = nn.Sequential(OrderedDict(rnns))
-
-        if batch_norm :
-            fc = nn.Sequential(nn.BatchNorm1d(self.num_directions*rnn_hidden_size),
-                        nn.Linear(self.num_directions*rnn_hidden_size, num_class+1, bias=False))
+class LayerCNN(nn.Module):
+    """
+    One CNN layer include conv2d, batchnorm, activation and maxpooling
+    """
+    def __init__(self, in_channel, out_channel, kernel_size, stride, padding, pooling_size=None, 
+                        activation_function=nn.ReLU, batch_norm=True, dropout=0.1):
+        super(LayerCNN, self).__init__()
+        self.conv = nn.Conv2d(in_channel, out_channel, kernel_size=kernel_size, stride=stride, padding=padding)
+        self.batch_norm = nn.BatchNorm2d(out_channel) if batch_norm else None
+        self.activation = activation_function(inplace=False)
+        if pooling_size is not None:
+            self.pooling = nn.MaxPool2d(pooling_size)
         else:
-            fc = nn.Linear(self.num_directions*rnn_hidden_size, num_class+1, bias=False)
+            self.pooling = None
         
-        self.fc = SequenceWise(fc)
-        self.inference_log_softmax = InferenceBatchLogSoftmax()
-    
     def forward(self, x):
-        #x: packed padded sequence
-        #x.data:           means the origin data
-        #x.batch_sizes:    the batch_size of each frames
-        #x_len:            type:list not torch.IntTensor
-        x = self.rnns(x)
-        #print(x)
-        x = self.fc(x)
-        
-        x, batch_seq = nn.utils.rnn.pad_packed_sequence(x,batch_first=False)
-        x = self.inference_log_softmax(x)
-
+        x = self.conv(x)
+        if self.batch_norm is not None:
+            x = self.batch_norm(x)
+        x = self.activation(x)
+        if self.pooling is not None:
+            x = self.pooling(x)
         return x
 
-    @staticmethod
-    def save_package(model, optimizer=None, decoder=None, epoch=None, loss_results=None, training_cer_results=None, dev_cer_results=None):
-        package = {
-                'input_size': model.rnn_input_size,
-                'hidden_size': model.rnn_hidden_size,
-                'rnn_layers': model.rnn_layers,
-                'rnn_type': model.rnn_type,
-                'num_class': model.num_class,
-                'bidirectional': model.num_directions,
-                '_drop_out' : model._drop_out,
-                'name': model.name,
-                'state_dict': model.state_dict()
-                }
-        if optimizer is not None:
-            package['optim_dict'] = optimizer.state_dict()
-        if decoder is not None:
-            package['decoder'] = decoder
-        if epoch is not None:
-            package['epoch'] = epoch
-        if loss_results is not None:
-            package['loss_results'] = loss_results
-            package['training_cer_results'] = training_cer_results
-            package['dev_cer_results'] = dev_cer_results
-        return package
-
-class CNN_LSTM_CTC(nn.Module):
-    def __init__(self, rnn_input_size=201, rnn_hidden_size=256, rnn_layers=4,
-                    rnn_type=nn.LSTM, bidirectional=True, 
-                    batch_norm=True, num_class=48, drop_out=0.1):
-        super(CNN_LSTM_CTC, self).__init__()
-        self.rnn_input_size = rnn_input_size
-        self.rnn_hidden_size = rnn_hidden_size
-        self.rnn_layers = rnn_layers
-        self.rnn_type = rnn_type
+class CTC_Model(nn.Module):
+    def __init__(self, rnn_param=None, add_cnn=False, cnn_param=None, num_class=48, drop_out=0.1):
+        """
+        rnn_param:    the dict of rnn parameters               type dict
+            rnn_param = {"rnn_input_size":201, "rnn_hidden_size":256, ....}
+        add_cnn  :    whether add cnn in the model             type bool 
+        cnn_param:    the cnn parameters, only support Conv2d  type list
+            cnn_param = {"layer":[[(in_channel, out_channel), (kernel_size), (stride), (padding), (pooling_size)],...], 
+                            "batch_norm":True, "activate_function":nn.ReLU}
+        num_class:    the number of units, add one for blank to be the classes to classify
+        drop_out :    drop_out paramteter for all place where need drop_out
+        """
+        super(CTC_Model, self).__init__()
+        if rnn_param is None or type(rnn_param) != dict:
+            raise ValueError("rnn_param need to be a dict to contain all params of rnn!")
+        self.rnn_param = rnn_param
+        self.add_cnn = add_cnn
+        self.cnn_param = cnn_param
         self.num_class = num_class
-        self.num_directions = 2 if bidirectional else 1
+        self.num_directions = 2 if rnn_param["bidirectional"] else 1
         self._drop_out = drop_out
-        self.name = 'CNN_LSTM_CTC'
         
-
-        #exp1 3*3 kernal_size to extract phone state and phon features
-        '''
-        self.conv = nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),             #音素三状态的检测
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d((3,3), stride=(1, 1), padding=(1, 1)),
-                nn.Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),            #音素的检测
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
-                )
-        '''
-        '''
-        #exp2 time dim 11 考虑一个音素大概时间为11帧，频率上考虑41维  deepspeech卷积层
-        self.conv = nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=(11, 41), stride=(2, 2), padding=(10, 0)), 
-                nn.BatchNorm2d(32),
-                nn.Hardtanh(0, 20, inplace=True),
-                #nn.MaxPool2d((3,3), stride=(1, 1), padding=(1, 1)),
-                nn.Conv2d(32, 32, kernel_size=(11, 21), stride=(1, 2), ),   
-                nn.BatchNorm2d(32),
-                nn.Hardtanh(0, 20, inplace=True),
-                #nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
-                )
-        '''
-        
-        #exp3 其他有可能的卷积核设计
-        self.conv = nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=(5, 41), stride=(2, 2), ), 
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                #nn.MaxPool2d((1, 3), stride=(1, 1), padding=(0, 1)),
-                nn.Conv2d(32, 32, kernel_size=(5, 21), stride=(1, 2), ),
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                #nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
-                )
-        
-        '''
-        #exp best one, 第一层增加maxpooling之后效果差不多
-        self.conv = nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=(3, 41), stride=(2, 2), ), 
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                #nn.MaxPool2d((3,3), stride=(3, 3), padding=(1, 1)),
-                nn.Conv2d(32, 32, kernel_size=(3, 21), stride=(1, 2), ),
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                #nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
-                )
-        '''
-        '''
-        #exp 多个cnn进行组合，分别使用不同的卷积核
-        self.conv = nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=(3, 21), stride=(2, 2), padding=(2, 0)), 
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                #nn.MaxPool2d((3,3), stride=(1, 1), padding=(1, 1)),
-                nn.Conv2d(32, 32, kernel_size=(3, 11), stride=(1, 2), ),
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                #nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
-                )
-
-        self.conv2 = nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=(3, 41), stride=(2, 2), padding=(2, 10)), 
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                #nn.MaxPool2d((3,3), stride=(1, 1), padding=(1, 1)),
-                nn.Conv2d(32, 32, kernel_size=(3, 21), stride=(1, 2), padding=(0, 5)),
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                #nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
-                )
-        
-        self.conv3 = nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=(3, 31), stride=(2, 2), padding=(2, 5)), 
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                #nn.MaxPool2d((3,3), stride=(1, 1), padding=(1, 1)),
-                nn.Conv2d(32, 32, kernel_size=(3, 17), stride=(1, 2), padding=(0, 3)),
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                #nn.MaxPool2d((3,3), stride=(2, 1), padding=(1,1))
-                )
-        '''
-        
-        rnn_input_size = int(math.floor((rnn_input_size-41)/2)+1)
-        rnn_input_size = int(math.floor((rnn_input_size-21)/2)+1)
-        rnn_input_size *= 32
-
+        if add_cnn:
+            cnns = []
+            activation = cnn_param["activate_function"]
+            batch_norm = cnn_param["batch_norm"]
+            rnn_input_size = rnn_param["rnn_input_size"]
+            cnn_layers = len(cnn_param["layer"])
+            for layer in range(cnn_layers):
+                in_channel = cnn_param["layer"][layer][0][0]
+                out_channel = cnn_param["layer"][layer][0][1]
+                kernel_size = cnn_param["layer"][layer][1]
+                stride = cnn_param["layer"][layer][2]
+                padding = cnn_param["layer"][layer][3]
+                pooling_size = cnn_param["layer"][layer][4]
+                
+                cnn = LayerCNN(in_channel, out_channel, kernel_size, stride, padding, pooling_size, 
+                                activation_function=activation, batch_norm=batch_norm, dropout=drop_out)
+                cnns.append(('%d' % layer, cnn))
+               
+                rnn_input_size = int(math.floor((rnn_input_size+2*padding[1]-kernel_size[1])/stride[1])+1)
+            
+            self.conv = nn.Sequential(OrderedDict(cnns))
+            #change the input of rnn, adjust the feature length and adjust the seq_len in dataloader
+            rnn_input_size *= out_channel
+        else:
+            rnn_input_size = rnn_param["rnn_input_size"]
         rnns = []
+        
+        rnn_hidden_size = rnn_param["rnn_hidden_size"]
+        rnn_type = rnn_param["rnn_type"]
+        rnn_layers = rnn_param["rnn_layers"]
+        bidirectional = rnn_param["bidirectional"]
+        batch_norm = rnn_param["batch_norm"]
+        
         rnn = BatchRNN(input_size=rnn_input_size, hidden_size=rnn_hidden_size, 
-                        rnn_type=rnn_type, bidirectional=bidirectional, 
+                        rnn_type=rnn_type, bidirectional=bidirectional, dropout=drop_out,
                         batch_norm=False)
         
         rnns.append(('0', rnn))
@@ -286,66 +172,66 @@ class CNN_LSTM_CTC(nn.Module):
 
         self.rnns = nn.Sequential(OrderedDict(rnns))
 
-        if batch_norm :
+        if batch_norm:
             fc = nn.Sequential(nn.BatchNorm1d(self.num_directions*rnn_hidden_size),
                         nn.Linear(self.num_directions*rnn_hidden_size, num_class+1, bias=False))
         else:
             fc = nn.Linear(self.num_directions*rnn_hidden_size, num_class+1, bias=False)
         
         self.fc = SequenceWise(fc)
-        self.inference_log_softmax = InferenceBatchLogSoftmax()
+        self.inference_softmax = BatchSoftmax()
     
-    def forward(self, x, visualize=None, dev=False):
+    def forward(self, x, visualize=False, dev=False):
         #x: batch_size * 1 * max_seq_length * feat_size
         if visualize:
             visual = [x]
 
         #print(x)
-        if visualize:
-            i = 0
-            for module in self.conv.children():
-                x = module(x)
-                if i+1 % 3 ==0:
-                    visual.append(x)
-                i += 1
-            visual.append(x)
-        else:
+        if self.add_cnn:
             x = self.conv(x)
-            #x = torch.cat((self.conv(x), self.conv2(x), self.conv3(x)), dim=1)
-
-        x = x.transpose(2, 3).contiguous()
-        sizes = x.size()
-
-        x = x.view(sizes[0], sizes[1]*sizes[2], sizes[3])
-        x = x.transpose(1,2).transpose(0,1).contiguous()
+            
+            if visualize:
+                visual.append(x)
+            
+            x = x.transpose(2, 3).contiguous()
+            sizes = x.size()
+            x = x.view(sizes[0], sizes[1]*sizes[2], sizes[3])
+            x = x.transpose(1,2).transpose(0,1).contiguous()
         
-        if visualize:
-            visual.append(x)
-        x = self.rnns(x)
-        #print(x)
-        
-        x = self.fc(x)
-
-        out = self.inference_log_softmax(x)
-        if visualize:
-            visual.append(out)
-            return out, visual
-        if dev:
-            return x, out
-        
-        return out
+            if visualize:
+                visual.append(x)
+            
+            x = self.rnns(x)
+            x = self.fc(x)
+            out = self.inference_softmax(x)
+            
+            if visualize:
+                visual.append(out)
+                return out, visual
+            if dev:
+                return x, out
+            return out
+        else:   
+            x = self.rnns(x)
+            x = self.fc(x)
+            x, batch_seq = nn.utils.rnn.pad_packed_sequence(x, batch_first=False)
+            
+            out = self.inference_softmax(x)
+            if visualize:
+                visual.append(out)
+                return out, visual
+            if dev:
+                return x, out
+            return out
 
     @staticmethod
     def save_package(model, optimizer=None, decoder=None, epoch=None, loss_results=None, dev_loss_results=None, dev_cer_results=None):
         package = {
-                'input_size': model.rnn_input_size,
-                'hidden_size': model.rnn_hidden_size,
-                'rnn_layers': model.rnn_layers,
-                'rnn_type': model.rnn_type,
+                'rnn_param': model.rnn_param,
+                'add_cnn': model.add_cnn,
+                'cnn_param': model.cnn_param,
                 'num_class': model.num_class,
-                'bidirectional': model.num_directions,
                 '_drop_out': model._drop_out,
-                'name': model.name,
                 'state_dict': model.state_dict()
                 }
         if optimizer is not None:
@@ -366,15 +252,9 @@ def xavier_uniform_init(m):
             nn.init.xavier_uniform(param.data)
 
 if __name__ == '__main__':
-    #model = CNN_LSTM_CTC(rnn_input_size=201, rnn_hidden_size=256, rnn_layers=4, 
-    #                    rnn_type=nn.LSTM, bidirectional=True, batch_norm=True, 
-    #                    num_class=48, drop_out=0)
+    model = CTC_Model(add_cnn=True, cnn_param={"batch_norm":True, "activativate_function":nn.ReLU, "layer":[[(1,32), (3,41), (1,2), (0,0), None],
+                            [(32,32), (3,21), (2,2), (0,0), None]]}, num_class=48, drop_out=0)
+    for idx, m in CTC_Model.modules():
+        print(idx, m)
     #model.apply(xavier_uniform_init) 
-    encoder = Encoder(11, 20)
-    src_pos = [[1,2,3,4,5,6,7,8,9,10],[1,2,3,4,5,0,0,0,0,0]]
-    src_pos = torch.LongTensor(src_pos)
-    src_pos = torch.autograd.Variable(src_pos)
-    print(src_pos)
-    out = encoder(src_pos)
-    print(out)
 

@@ -87,28 +87,12 @@ class myDataset(Dataset):
         f = open(wav_path, 'r')
         for line in f.readlines():
             utt, path = line.strip().split()
-            spect = parse_audio(path, audio_conf, windows)
+            spect = parse_audio(path, audio_conf, windows, normalize=self.normalize)
             #print(spect)
             spec_dict[utt] = spect.numpy()
         f.close()
         
-        if self.normalize:
-            i = 0
-            for utt in spec_dict:
-                if i == 0:
-                    spec_all = torch.FloatTensor(spec_dict[utt])
-                else:
-                    spec_all = torch.cat((spec_all, torch.FloatTensor(spec_dict[utt])), 0)
-                i += 1
-            mean = torch.mean(spec_all, 0, True)
-            std = torch.std(spec_all, 0, True)
-            for utt in spec_dict:
-                tmp = torch.add(torch.FloatTensor(spec_dict[utt]), -1, mean)
-                spec_dict[utt] = torch.div(tmp, std).numpy()
-                
-        if len(spec_dict) != len(label_dict):
-            print("%s data: The num of wav and text are not the same!" % self.data_set)
-            sys.exit(1)
+        assert len(spec_dict) == len(label_dict)
         
         self.features_label = []
         #save the data as h5 file
@@ -180,11 +164,13 @@ def create_RNN_input(batch):
     #src_pos = torch.LongTensor(np.array(src_pos))
     return inputs, targets, input_sizes, input_size_list, target_sizes
 
-#class torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, 
-#                           sampler=None, batch_sampler=None, num_workers=0, 
-#                           collate_fn=<function default_collate>, 
-#                           pin_memory=False, drop_last=False)
-#subclass of DataLoader and rewrite the collate_fn to form batch
+'''
+class torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, 
+                                        sampler=None, batch_sampler=None, num_workers=0, 
+                                        collate_fn=<function default_collate>, 
+                                        pin_memory=False, drop_last=False)
+subclass of DataLoader and rewrite the collate_fn to form batch
+'''
 
 class myDataLoader(DataLoader):
     def __init__(self, *args, **kwargs):
@@ -200,11 +186,6 @@ def create_CNN_input(batch):
     def func(p):
         return p[0].size(0)
     
-    def change_size(size):
-        size = int(math.floor((size+12-7)/2)+1)
-        size = int(math.floor((size-7)/1)+1)
-        return size
-
     #sort batch according to the frame nums
     batch = sorted(batch, reverse=True, key=func)
     longest_sample = batch[0][0]
@@ -212,34 +193,34 @@ def create_CNN_input(batch):
     max_length = longest_sample.size(0)
     batch_size = len(batch)
     inputs = torch.zeros(batch_size, 1, max_length, feat_size)
-    input_sizes = torch.IntTensor(batch_size)
+    input_percentages = torch.FloatTensor(batch_size)
     target_sizes = torch.IntTensor(batch_size)
     targets = []
-    input_size_list = []
+    input_percentages_list = []
     for x in range(batch_size):
         sample = batch[x]
         feature = sample[0]
         label = sample[1]
         seq_length = feature.size(0)
         inputs[x][0].narrow(0, 0, seq_length).copy_(feature)
-        input_sizes[x] = change_size(seq_length)
-        input_size_list.append(change_size(seq_length))
+        input_percentages[x] = seq_length / float(max_length)
+        input_percentages_list.append(seq_length / float(max_length))
         target_sizes[x] = len(label)
         targets.extend(label)
     targets = torch.IntTensor(targets)
-    return inputs, targets, input_sizes, input_size_list, target_sizes 
+    return inputs, targets, input_percentages, input_percentages_list, target_sizes 
 
 if __name__ == '__main__':
-    dev_dataset = myDataset('../data_prepare/data', data_set='dev', feature_type="spectrum", out_type='phone', n_feats=201, mel=True)
+    dev_dataset = myDataset('../data_prepare/data', data_set='train', feature_type="spectrum", out_type='phone', n_feats=201, mel=True)
+    #dev_dataloader = myDataLoader(dev_dataset, batch_size=2, shuffle=True)
+    
     import visdom
     viz = visdom.Visdom(env='fan')
     for i in range(1):
-        for j in range(40, 41):
-            show = dev_dataset[i][0].numpy()[j]
-            #print(show)
-            x = range(201)
-            viz.line(X=np.array(x), Y=show)
-        viz.image(dev_dataset[i][0])
-    #viz.image(np.ones((3, 10, 10)))
-    #dev_loader = myDataLoader(dev_dataset, batch_size=8, shuffle=True, num_workers=4, pin_memory=False)
-    #print(dev_dataset.int2phone)
+        show = dev_dataset[i][0].transpose(0, 1)
+        text = dev_dataset[i][1]
+        for num in range(len(text)):
+            text[num] = dev_dataset.int2phone[text[num]]
+        text = ' '.join(text)
+        opts = dict(title=text, xlabel='frame', ylabel='spectrum')
+        viz.heatmap(show, opts = opts)

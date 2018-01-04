@@ -19,7 +19,6 @@ parser.add_argument('--model-path', dest='model_path', help='Model file to decod
 parser.add_argument('--decode-type', dest='decode_type', default='Greedy', help='Decoder for test. GreadyDecoder or Beam search Decoder')
 parser.add_argument('--map-48-39', dest='map_48_39', help='map 48 phones to 39 when test')
 parser.add_argument('--data-set', dest='data_set', default='test', help='data set to test')
-parser.add_argument('--lm-path', dest='lm_path', default=None, help='phoneme-level training data for lm')
 
 def test():
     args = parser.parse_args()
@@ -31,17 +30,17 @@ def test():
         cf.read(args.conf)
         model_path = cf.get('Model', 'model_file')
         data_dir = cf.get('Data', 'data_dir')
-        beam_width = cf.getint('Decode', 'beam_width')
-        lm_alpha = cf.getfloat('Decode', 'lm_alpha')
         package = torch.load(model_path)
     
-    rnn_param = package["rnn_param"]
-    add_cnn = package["add_cnn"]
-    cnn_param = package["cnn_param"]
+    input_size = package['input_size']
+    layers = package['rnn_layers']
+    hidden_size = package['hidden_size']
+    rnn_type = package['rnn_type']
     num_class = package["num_class"]
     feature_type = package['epoch']['feature_type']
     n_feats = package['epoch']['n_feats']
     out_type = package['epoch']['out_type']
+    model_type = package['name']
     drop_out = package['_drop_out']
     try:
         mel = package['epoch']['mel']
@@ -54,12 +53,16 @@ def test():
 
     test_dataset = myDataset(data_dir, data_set=args.data_set, feature_type=feature_type, out_type=out_type, n_feats=n_feats, mel=mel)
     
-    model = CTC_Model(rnn_param=rnn_param, add_cnn=add_cnn, cnn_param=cnn_param, num_class=num_class, drop_out=drop_out)
-        
-    if add_cnn:
-        test_loader = myCNNDataLoader(test_dataset, batch_size=8, shuffle=False, num_workers=4, pin_memory=False)
+    if model_type == 'CNN_LSTM_CTC':
+        model = CNN_LSTM_CTC(rnn_input_size=input_size, rnn_hidden_size=hidden_size, rnn_layers=layers, 
+                    rnn_type=rnn_type, bidirectional=True, batch_norm=True, num_class=num_class, drop_out=drop_out)
+        test_loader = myCNNDataLoader(test_dataset, batch_size=8, shuffle=False,
+                    num_workers=4, pin_memory=False)
     else:
-        test_loader = myDataLoader(test_dataset, batch_size=8, shuffle=False, num_workers=4, pin_memory=False)
+        model = CTC_RNN(rnn_input_size=input_size, rnn_hidden_size=hidden_size, rnn_layers=layers,
+                    rnn_type=rnn_type, bidirectional=True, batch_norm=True, num_class=num_class, drop_out=drop_out)
+        test_loader = myDataLoader(test_dataset, batch_size=8, shuffle=False,
+                    num_workers=4, pin_memory=False)
     
     model.load_state_dict(package['state_dict'])
     model.eval()
@@ -70,7 +73,7 @@ def test():
     if decoder_type == 'Greedy':
         decoder  = GreedyDecoder(test_dataset.int2phone, space_idx=-1, blank_index=0)
     else:
-        decoder = BeamDecoder(test_dataset.int2phone, beam_width=beam_width, blank_index=0, space_idx=-1, lm_path=args.lm_path, lm_alpha=lm_alpha)    
+        decoder = BeamDecoder(test_dataset.int2phone, beam_width=20, blank_index=0, space_idx=-1, lm_path=None)    
     
     if args.map_48_39 is not None:
         import pickle
@@ -84,22 +87,17 @@ def test():
     start = time.time()
     for data in test_loader:
         inputs, target, input_sizes, input_size_list, target_sizes = data 
-        if not add_cnn:
+        if model.name == 'CTC_RNN':
             inputs = inputs.transpose(0,1)
         inputs = Variable(inputs, volatile=True, requires_grad=False)
-        
         if USE_CUDA:
             inputs = inputs.cuda()
         
-        if not add_cnn:
+        if model.name == 'CTC_RNN':
             inputs = nn.utils.rnn.pack_padded_sequence(inputs, input_size_list)
-        
         probs = model(inputs)
-        if add_cnn:
-            max_length = probs.size(0)
-            input_sizes_list = [int(x*max_length) for x in input_sizes_list]
-        
         probs = probs.data.cpu()
+        
         decoded = decoder.decode(probs, input_size_list)
         targets = decoder._unflatten_targets(target, target_sizes)
         labels = decoder._process_strings(decoder._convert_to_strings(targets))
@@ -115,8 +113,8 @@ def test():
                 decoded[x] = ' '.join(decode)
 
         for x in range(len(labels)):
-            print("origin : " + labels[x])
-            print("decoded: " + decoded[x])
+            print("origin: "+ labels[x])
+            print("decoded: "+ decoded[x])
         cer = 0
         wer = 0
         for x in range(len(labels)):
@@ -132,7 +130,7 @@ def test():
     print("Word error rate on test set: %.4f" % WER)
     end = time.time()
     time_used = (end - start) / 60.0
-    print("time used for decode %d sentences: %.4f" % (len(test_dataset), time_used))
+    print("time used: %.4f" % time_used )
 
 if __name__ == "__main__":
     test()
