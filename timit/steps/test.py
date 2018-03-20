@@ -1,24 +1,22 @@
 #!/usr/bin/python
 #encoding=utf-8
 
-from data_loader import myDataset
-from data_loader import myDataLoader, myCNNDataLoader
-from model import *
-from ctcDecoder import GreedyDecoder, BeamDecoder
+import time
 import torch
+import argparse
+import ConfigParser
 import torch.nn as nn
 from torch.autograd import Variable
-import time
-import argparse
-import sys
-import ConfigParser
+
+from ctc_model import *
+from ctcDecoder import GreedyDecoder, BeamDecoder
+from data_loader import SpeechDataset, SpeechDataLoader, SpeechCNNDataLoader
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--conf', help='conf file for training')
 parser.add_argument('--model-path', dest='model_path', help='Model file to decode for test')
-parser.add_argument('--decode-type', dest='decode_type', default='Greedy', help='Decoder for test. GreadyDecoder or Beam search Decoder')
 parser.add_argument('--map-48-39', dest='map_48_39', help='map 48 phones to 39 when test')
-parser.add_argument('--data-set', dest='data_set', default='test', help='data set to test')
 parser.add_argument('--lm-path', dest='lm_path', default=None, help='phoneme-level training data for lm')
 
 def test():
@@ -31,8 +29,7 @@ def test():
         cf.read(args.conf)
         model_path = cf.get('Model', 'model_file')
         data_dir = cf.get('Data', 'data_dir')
-        beam_width = cf.getint('Decode', 'beam_width')
-        lm_alpha = cf.getfloat('Decode', 'lm_alpha')
+        
         package = torch.load(model_path)
     
     rnn_param = package["rnn_param"]
@@ -47,19 +44,21 @@ def test():
         mel = package['epoch']['mel']
     except:
         mel = False
-    #weight_decay = package['epoch']['weight_decay']
-    #print(weight_decay)
 
-    decoder_type =  args.decode_type
+    USE_CUDA = cf.getboolean('Training', 'use_cuda')
+    beam_width = cf.getint('Decode', 'beam_width')
+    lm_alpha = cf.getfloat('Decode', 'lm_alpha')
+    decoder_type =  cf.get('Decode', 'decode_type')
+    data_set = cf.get('Decode', 'eval_dataset')
 
-    test_dataset = myDataset(data_dir, data_set=args.data_set, feature_type=feature_type, out_type=out_type, n_feats=n_feats, mel=mel)
+    test_dataset = SpeechDataset(data_dir, data_set=data_set, feature_type=feature_type, out_type=out_type, n_feats=n_feats, mel=mel)
     
     model = CTC_Model(rnn_param=rnn_param, add_cnn=add_cnn, cnn_param=cnn_param, num_class=num_class, drop_out=drop_out)
         
     if add_cnn:
-        test_loader = myCNNDataLoader(test_dataset, batch_size=8, shuffle=False, num_workers=4, pin_memory=False)
+        test_loader = SpeechCNNDataLoader(test_dataset, batch_size=8, shuffle=False, num_workers=4, pin_memory=False)
     else:
-        test_loader = myDataLoader(test_dataset, batch_size=8, shuffle=False, num_workers=4, pin_memory=False)
+        test_loader = SpeechDataLoader(test_dataset, batch_size=8, shuffle=False, num_workers=4, pin_memory=False)
     
     model.load_state_dict(package['state_dict'])
     model.eval()
@@ -97,8 +96,8 @@ def test():
         probs = model(inputs)
         if add_cnn:
             max_length = probs.size(0)
-            input_sizes_list = [int(x*max_length) for x in input_sizes_list]
-        
+            input_size_list = [int(x*max_length) for x in input_size_list]
+
         probs = probs.data.cpu()
         decoded = decoder.decode(probs, input_size_list)
         targets = decoder._unflatten_targets(target, target_sizes)
@@ -132,7 +131,7 @@ def test():
     print("Word error rate on test set: %.4f" % WER)
     end = time.time()
     time_used = (end - start) / 60.0
-    print("time used for decode %d sentences: %.4f" % (len(test_dataset), time_used))
+    print("time used for decode %d sentences: %.4f minutes." % (len(test_dataset), time_used))
 
 if __name__ == "__main__":
     test()

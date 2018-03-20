@@ -1,16 +1,18 @@
 #!/bin/bash
 
-#Top script for My experiment
 #Author: Richardfan
-#2017.11.1
+#2017.11.1    Training acoustic model and decode with phoneme-level bigram
+#2018.3.16    Add RNNLM and decode with RNNLM
+
+#Top script of one entire experiment
+
 
 stage=0
 
-decode_type='Greedy'
-data_set='test'
-lm_path='./data_prepare/data/lm_train.text'
+lm_path='./data_prepare/bigram.arpa'
 CONF_FILE='./conf/ctc_model_setting.conf'
 LOG_DIR='./log/'
+MAP_FILE='./decode_map_48-39/map_dict.pkl'
 
 if [ ! -z $1 ]; then
     stage=$1
@@ -18,15 +20,30 @@ fi
 
 if [ $stage -le 0 ]; then
     echo ========================================================
-    echo "                     Training                         "
+    echo "                   Data Preparing                     "
+    echo ========================================================
+
+fi
+
+if [ $stage -le 1 ]; then
+    echo ========================================================
+    echo "                  Acoustic Model                      "
     echo ========================================================
 
     python steps/ctc_train.py --conf $CONF_FILE --log-dir $LOG_DIR || exit 1;
 fi
 
-echo ========================================================
-echo "                 Greedy Decoding                      "
-echo ========================================================
+if [ $stage -le 2 ]; then
+    echo ========================================================
+    echo "                   RNNLM Model                        "
+    echo ========================================================
+fi
 
-python steps/test.py --conf $CONF_FILE --decode-type $decode_type --map-48-39 ./decode_map_48-39/map_dict.pkl --data-set $data_set --lm-path $lm_path
+if [ $stage -le 3 ]; then
+    echo ========================================================
+    echo "                     Decoding                         "
+    echo ========================================================
+
+    python steps/test.py --conf $CONF_FILE --map-48-39 $MAP_FILE --lm-path $lm_path || exit 1;
+fi
 

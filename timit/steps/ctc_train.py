@@ -1,30 +1,43 @@
 #!/usr/bin/python
 #encoding=utf-8
 
-#train process for the model
-
-from data_loader import myDataset, myCNNDataLoader, myDataLoader
-from model import *
-from ctcDecoder import GreedyDecoder
-from warpctc_pytorch import CTCLoss
+import os
+import sys
+import copy
+import time 
 import torch
+import argparse
+import numpy as np
+import ConfigParser
 import torch.nn as nn
 from torch.autograd import Variable
-import time 
-import numpy as np
-import argparse
-import ConfigParser
-import os
-import copy
 
-RNN = {'nn.LSTM':nn.LSTM, 'nn.GRU': nn.GRU, 'nn.RNN':nn.RNN}
-activate_f = {'relu':nn.ReLU, 'tanh':nn.Tanh, 'sigmoid':nn.Sigmoid}
+from ctc_model import *
+from warpctc_pytorch import CTCLoss
+from ctcDecoder import GreedyDecoder
+from data_loader import SpeechDataset, SpeechCNNDataLoader, SpeechDataLoader
+
+supported_rnn = {'nn.LSTM':nn.LSTM, 'nn.GRU': nn.GRU, 'nn.RNN':nn.RNN}
+supported_activate = {'relu':nn.ReLU, 'tanh':nn.Tanh, 'sigmoid':nn.Sigmoid}
 
 parser = argparse.ArgumentParser(description='cnn_lstm_ctc')
 parser.add_argument('--conf', default='../conf/cnn_lstm_ctc_setting.conf' , help='conf file with Argument of LSTM and training')
 parser.add_argument('--log-dir', dest='log_dir', default='../log', help='log file for training')
 
-def train(model, train_loader, loss_fn, optimizer, logger, add_cnn=True, print_every=20):
+
+def train(model, train_loader, loss_fn, optimizer, logger, add_cnn=True, print_every=20, USE_CUDA=True):
+    '''训练一个epoch，即将整个训练集跑一遍
+    Args:
+        model         :  定义的网络模型
+        train_loader  :  加载训练集的类对象
+        loss_fn       :  损失函数，此处为CTCLoss
+        optimizer     :  优化器类对象
+        logger        :  日志类对象
+        print_every   :  每20个batch打印一次loss
+        USE_CUDA      :  是否使用GPU
+    Returns:
+        average_loss  :  一个epoch的平均loss
+    '''
     model.train()
     
     total_loss = 0
@@ -50,6 +63,7 @@ def train(model, train_loader, loss_fn, optimizer, logger, add_cnn=True, print_e
         if add_cnn:
             max_length = out.size(0)
             input_sizes = Variable(input_sizes.mul_(int(max_length)).int(), requires_grad=False)
+            input_sizes_list = [int(x*max_length) for x in input_sizes_list]
         else:
             input_sizes = Variable(input_sizes, requires_grad=False)
         
@@ -65,19 +79,27 @@ def train(model, train_loader, loss_fn, optimizer, logger, add_cnn=True, print_e
         total_loss += loss.data[0]
         optimizer.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm(model.parameters(), 400)                #防止梯度爆炸或者梯度消失，限制参数范围       
+        nn.utils.clip_grad_norm(model.parameters(), 400)
         optimizer.step()
-        
-        if USE_CUDA:
-            torch.cuda.synchronize()
-        
         i += 1
     average_loss = total_loss / i
     print("Epoch done, average loss: %.4f" % average_loss)
     logger.info("Epoch done, average loss: %.4f" % average_loss)
     return average_loss
 
-def dev(model, dev_loader, loss_fn, decoder, logger, add_cnn=True):
+def dev(model, dev_loader, loss_fn, decoder, logger, add_cnn=True, USE_CUDA=True):
+    '''验证集的计算过程，与train()不同的是不需要反向传播过程，并且需要计算正确率
+    Args:
+        model       :   模型
+        dev_loader  :   加载验证集的类对象
+        loss_fn     :   损失函数
+        decoder     :   解码类对象，即将网络的输出解码成文本
+        logger      :   日志类对象
+        USE_CUDA    :   是否使用GPU
+    Returns:
+        acc * 100    :   字符正确率，如果space不是一个标签的话，则为词正确率
+        average_loss :   验证集的平均loss
+    '''
     model.eval()
     total_cer = 0
     total_tokens = 0
@@ -116,18 +138,24 @@ def dev(model, dev_loader, loss_fn, decoder, logger, add_cnn=True):
         probs = probs.data.cpu()
         targets = targets.data
         target_sizes = target_sizes.data
+
         if decoder.space_idx == -1:
             total_cer += decoder.phone_word_error(probs, input_sizes_list, targets, target_sizes)[1]
         else:
             total_cer += decoder.phone_word_error(probs, input_sizes_list, targets, target_sizes)[0]
         total_tokens += sum(target_sizes)
         i += 1
-    #print(total_cer, total_tokens)
     acc = 1 - float(total_cer) / total_tokens
     average_loss = total_loss / i
     return acc*100, average_loss
 
 def init_logger(log_file):
+    '''得到一个日志的类对象
+    Args:
+        log_file   :  日志文件名
+    Returns:
+        logger     :  日志类对象
+    '''
     import logging
     from logging.handlers import RotatingFileHandler
 
@@ -139,6 +167,13 @@ def init_logger(log_file):
     logger.setLevel(logging.DEBUG)
     return logger
 
+def add_weights_noise(m):
+    for param in m.parameters():
+        weight_noise = param.data.new(param.size()).normal_(0, 0.075)
+        if USE_CUDA:
+            weight_noise = weight_noise.cuda()
+        param = torch.nn.parameter.Parameter(param.data + weight_noise)
+
 def main():
     args = parser.parse_args()
     cf = ConfigParser.ConfigParser()
@@ -146,16 +181,19 @@ def main():
         cf.read(args.conf)
     except:
         print("conf file not exists")
-    
+        sys.exit(1)
     try:
         seed = cf.get('Training', 'seed')
         seed = long(seed)
     except:
         seed = torch.cuda.initial_seed()
+        cf.set('Training', 'seed', seed)
+        cf.write(open(args.conf, 'w'))
     
+    USE_CUDA = cf.getboolean("Training", "use_cuda")
     torch.manual_seed(seed)
     if USE_CUDA:
-        torch.cuda.manual_seed_all(seed)
+        torch.cuda.manual_seed(seed)
     
     logger = init_logger(os.path.join(args.log_dir, 'train_ctc_model.log'))
     
@@ -163,7 +201,7 @@ def main():
     rnn_input_size = cf.getint('Model', 'rnn_input_size')
     rnn_hidden_size = cf.getint('Model', 'rnn_hidden_size')
     rnn_layers = cf.getint('Model', 'rnn_layers')
-    rnn_type = RNN[cf.get('Model', 'rnn_type')]
+    rnn_type = supported_rnn[cf.get('Model', 'rnn_type')]
     bidirectional = cf.getboolean('Model', 'bidirectional')
     batch_norm = cf.getboolean('Model', 'batch_norm')
     rnn_param = {"rnn_input_size":rnn_input_size, "rnn_hidden_size":rnn_hidden_size, "rnn_layers":rnn_layers, 
@@ -181,7 +219,7 @@ def main():
     padding = eval(cf.get('CNN', 'padding'))
     pooling = eval(cf.get('CNN', 'pooling'))
     batch_norm = cf.getboolean('CNN', 'batch_norm')
-    activation_function = activate_f[cf.get('CNN', 'activation_function')]
+    activation_function = supported_activate[cf.get('CNN', 'activation_function')]
     
     cnn_param['batch_norm'] = batch_norm
     cnn_param['activate_function'] = activation_function
@@ -194,12 +232,10 @@ def main():
             layer_param.append(None)
         cnn_param["layer"].append(layer_param)
 
-    model = CTC_Model(rnn_param=rnn_param, add_cnn=add_cnn, cnn_param=cnn_param,
-                         num_class=num_class, drop_out=drop_out)
-    #model.apply(xavier_uniform_init)
-    for idx, m in enumerate(model.modules()):
+    model = CTC_Model(rnn_param=rnn_param, add_cnn=add_cnn, cnn_param=cnn_param, num_class=num_class, drop_out=drop_out)
+    
+    for idx, m in enumerate(model.children()):
         print(idx, m)
-        break
     
     dataset = cf.get('Data', 'dataset')
     data_dir = cf.get('Data', 'data_dir')
@@ -210,21 +246,21 @@ def main():
     batch_size = cf.getint("Training", 'batch_size')
     
     #Data Loader
-    train_dataset = myDataset(data_dir, data_set='train', feature_type=feature_type, out_type=out_type, n_feats=n_feats, mel=mel)
-    dev_dataset = myDataset(data_dir, data_set="dev", feature_type=feature_type, out_type=out_type, n_feats=n_feats, mel=mel)
+    train_dataset = SpeechDataset(data_dir, data_set='train', feature_type=feature_type, out_type=out_type, n_feats=n_feats, mel=mel)
+    dev_dataset = SpeechDataset(data_dir, data_set="dev", feature_type=feature_type, out_type=out_type, n_feats=n_feats, mel=mel)
     if add_cnn:
-        train_loader = myCNNDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+        train_loader = SpeechCNNDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                                             num_workers=4, pin_memory=False)
-        dev_loader = myCNNDataLoader(dev_dataset, batch_size=batch_size, shuffle=False,
+        dev_loader = SpeechCNNDataLoader(dev_dataset, batch_size=batch_size, shuffle=False,
                                             num_workers=4, pin_memory=False)
     else:
-        train_loader = myDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+        train_loader = SpeechDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                                             num_workers=4, pin_memory=False)
-        dev_loader = myDataLoader(dev_dataset, batch_size=batch_size, shuffle=False,
+        dev_loader = SpeechDataLoader(dev_dataset, batch_size=batch_size, shuffle=False,
                                             num_workers=4, pin_memory=False)
     #decoder for dev set
     decoder = GreedyDecoder(dev_dataset.int2phone, space_idx=-1, blank_index=0)
-    
+        
     #Training
     init_lr = cf.getfloat('Training', 'init_lr')
     num_epoches = cf.getint('Training', 'num_epoches')
@@ -264,7 +300,6 @@ def main():
     stop_train = False
     adjust_time = 0
     acc_best = 0
-    acc_best_true = 0
     start_time = time.time()
     loss_results = []
     dev_loss_results = []
@@ -295,6 +330,8 @@ def main():
         #adjust learning rate by dev_loss
         if dev_loss < (loss_best - end_adjust_acc):
             loss_best = dev_loss
+            loss_best_true = dev_loss
+            #acc_best = acc
             adjust_rate_count = 0
             model_state = copy.deepcopy(model.state_dict())
             op_state = copy.deepcopy(optimizer.state_dict())
@@ -302,6 +339,7 @@ def main():
             adjust_rate_count += 1
             if dev_loss < loss_best and dev_loss < loss_best_true:
                 loss_best_true = dev_loss
+                #acc_best = acc
                 model_state = copy.deepcopy(model.state_dict())
                 op_state = copy.deepcopy(optimizer.state_dict())
         else:
@@ -311,26 +349,6 @@ def main():
             acc_best = acc
             best_model_state = copy.deepcopy(model.state_dict())
             best_op_state = copy.deepcopy(optimizer.state_dict())
-        
-        '''
-        #adjust learning rate by dev_acc
-        if acc > (acc_best + end_adjust_acc):
-            acc_best = acc
-            adjust_rate_count = 0
-            loss_best = dev_loss
-            model_state = copy.deepcopy(model.state_dict())
-            op_state = copy.deepcopy(optimizer.state_dict())
-        elif (acc > acc_best - end_adjust_acc):
-            adjust_rate_count += 1
-            if acc > acc_best and acc > acc_best_true:
-                acc_best_true = acc
-                loss_best = dev_loss
-                model_state = copy.deepcopy(model.state_dict())
-                op_state = copy.deepcopy(optimizer.state_dict())
-        else:
-            adjust_rate_count = 0
-        #torch.save(model.state_dict(), model_path_reject)
-        '''
 
         print("adjust_rate_count:"+str(adjust_rate_count))
         print('adjust_time:'+str(adjust_time))
@@ -343,8 +361,6 @@ def main():
             adjust_rate_count = 0
             if loss_best > loss_best_true:
                 loss_best = loss_best_true
-            #if acc_best < acc_best_true:
-            #    acc_best = acc_best_true
             model.load_state_dict(model_state)
             optimizer.load_state_dict(op_state)
 
@@ -363,11 +379,11 @@ def main():
             else:
                 viz.line(X = np.array(x_axis), Y = np.array(y_axis[x]), win = viz_window[x], update = 'replace',)
 
-    print("End training, best cv loss is: %.4f, acc is: %.4f" % (loss_best, acc_best))
-    logger.info("End training, best loss acc is: %.4f, acc is: %.4f" % (loss_best, acc_best)) 
+    print("End training, best dev loss is: %.4f, acc is: %.4f" % (loss_best, acc_best))
+    logger.info("End training, best dev loss acc is: %.4f, acc is: %.4f" % (loss_best, acc_best)) 
     model.load_state_dict(best_model_state)
     optimizer.load_state_dict(best_op_state)
-    best_path = os.path.join(args.log_dir, 'best_model'+'_cv'+str(acc_best)+'.pkl')
+    best_path = os.path.join(args.log_dir, 'best_model'+'_dev'+str(acc_best)+'.pkl')
     cf.set('Model', 'model_file', best_path)
     cf.write(open(args.conf, 'w'))
     params['epoch']=count

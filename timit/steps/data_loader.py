@@ -2,25 +2,22 @@
 #encoding=utf-8
 
 import os
-import h5py
-import numpy as np
-import torch
 import sys
-from torch.utils.data import DataLoader
-from torch.utils.data import Dataset
+import h5py
+import torch
+import numpy as np
 import scipy.signal
-import math
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+
 from utils import parse_audio, process_kaldi_feat, process_label_file, process_map_file, F_Mel
 
 windows = {'hamming':scipy.signal.hamming, 'hann':scipy.signal.hann, 'blackman':scipy.signal.blackman,
-            'bartlett':scipy.signal.bartlett}
+              'bartlett':scipy.signal.bartlett}
 audio_conf = {"sample_rate":16000, 'window_size':0.025, 'window_stride':0.01, 'window': 'hamming'}
 
-
-#Override the class of Dataset
-#Define my own dataset over timit used the feature extracted by kaldi
-class myDataset(Dataset):
-    def __init__(self, data_dir, data_set='train', feature_type='spectrum', out_type='phone', n_feats=39, normalize=True, mel=False):
+class SpeechDataset(Dataset):
+    def __init__(self, data_dir, data_set='train', feature_type='spectrum', out_type='phone', n_feats=39, normalize=True, mel=True):
         self.data_set = data_set
         self.out_type = out_type
         self.feature_type = feature_type
@@ -88,7 +85,6 @@ class myDataset(Dataset):
         for line in f.readlines():
             utt, path = line.strip().split()
             spect = parse_audio(path, audio_conf, windows, normalize=self.normalize)
-            #print(spect)
             spec_dict[utt] = spect.numpy()
         f.close()
         
@@ -151,7 +147,6 @@ def create_RNN_input(batch):
     for x in range(batch_size):
         sample = batch[x]
         feature = sample[0]
-        #feature = sample[0].transpose(0,1)[:101].transpose(0,1)
         label = sample[1]
         seq_length = feature.size(0)
         inputs[x].narrow(0, 0, seq_length).copy_(feature)
@@ -160,26 +155,22 @@ def create_RNN_input(batch):
         target_sizes[x] = len(label)
         targets.extend(label)
     targets = torch.IntTensor(targets)
-    #src_pos = [[(pos+1) if (w!=[0]*feat_size).any() else 0 for pos, w in enumerate(instance)] for instance in inputs.numpy()]
-    #src_pos = torch.LongTensor(np.array(src_pos))
     return inputs, targets, input_sizes, input_size_list, target_sizes
 
 '''
-class torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, 
-                                        sampler=None, batch_sampler=None, num_workers=0, 
-                                        collate_fn=<function default_collate>, 
-                                        pin_memory=False, drop_last=False)
+class torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None, num_workers=0, 
+                                        collate_fn=<function default_collate>, pin_memory=False, drop_last=False)
 subclass of DataLoader and rewrite the collate_fn to form batch
 '''
 
-class myDataLoader(DataLoader):
+class SpeechDataLoader(DataLoader):
     def __init__(self, *args, **kwargs):
-        super(myDataLoader, self).__init__(*args, **kwargs)
+        super(SpeechDataLoader, self).__init__(*args, **kwargs)
         self.collate_fn = create_RNN_input
 
-class myCNNDataLoader(DataLoader):
+class SpeechCNNDataLoader(DataLoader):
     def __init__(self, *args, **kwargs):
-        super(myCNNDataLoader, self).__init__(*args, **kwargs)
+        super(SpeechCNNDataLoader, self).__init__(*args, **kwargs)
         self.collate_fn = create_CNN_input
 
 def create_CNN_input(batch):
@@ -211,8 +202,8 @@ def create_CNN_input(batch):
     return inputs, targets, input_percentages, input_percentages_list, target_sizes 
 
 if __name__ == '__main__':
-    dev_dataset = myDataset('../data_prepare/data', data_set='train', feature_type="spectrum", out_type='phone', n_feats=201, mel=True)
-    #dev_dataloader = myDataLoader(dev_dataset, batch_size=2, shuffle=True)
+    dev_dataset = SpeechDataset('../data_prepare/data', data_set='train', feature_type="spectrum", out_type='phone', n_feats=201, mel=True)
+    #dev_dataloader = SpeechDataLoader(dev_dataset, batch_size=2, shuffle=True)
     
     import visdom
     viz = visdom.Visdom(env='fan')

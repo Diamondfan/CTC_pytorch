@@ -3,11 +3,11 @@
 
 __author__ = 'Richardfan'
 
-import torchaudio
-import librosa
-import numpy as np
-import torch
 import math
+import torch
+import librosa
+import torchaudio
+import numpy as np
 
 def load_audio(path):
     '''
@@ -22,14 +22,14 @@ def load_audio(path):
         if sound.shape[1] == 1:
             sound = sound.squeeze()
         else:
-            sound - sound.mean(axis=1)
+            sound = sound.mean(axis=1)
     return sound
 
 def parse_audio(path, audio_conf, windows, normalize=False):
     '''
     Input:
         path       : string 导入音频的路径
-        audio_conf : dcit 求频谱的音频参数
+        audio_conf : dict 求频谱的音频参数
         windows    : dict 加窗类型
     Output:
         spect      : FloatTensor  每帧的频谱
@@ -39,7 +39,6 @@ def parse_audio(path, audio_conf, windows, normalize=False):
     win_length = n_fft
     hop_length = int(audio_conf['sample_rate']*audio_conf['window_stride'])
     window = windows[audio_conf['window']]
-    #D = librosa.cqt(y, sr=audio_conf['sample_rate'])
     D = librosa.stft(y, n_fft=n_fft, hop_length=hop_length,
                         win_length=win_length, window=window)
     spect, phase = librosa.magphase(D) 
@@ -48,11 +47,7 @@ def parse_audio(path, audio_conf, windows, normalize=False):
     spect = spect.log1p()
     
     if normalize:
-        #mean = math.sqrt(torch.mul(spect, spect).max())
-        #std = math.sqrt(torch.mul(spect, spect).std())
         mean = spect.mean()
-        #max_spect = spect.max()
-        #min_spect = spect.min()
         std = spect.std()
         spect.add_(-mean)
         spect.div_(std)
@@ -68,7 +63,7 @@ def F_Mel(fre_f, audio_conf):
         mel_f       : FloatTensor  换成mel频谱
     '''
     n_mels = fre_f.size(1)
-    mel_bin = librosa.mel_frequencies(n_mels=n_mels, fmin=0, fmax=audio_conf["sample_rate"]/2) / 40
+    mel_bin = librosa.mel_frequencies(n_mels=n_mels, fmin=0, fmax=audio_conf["sample_rate"]/2) * audio_conf["window_size"]
     count = 0
     fre_f = fre_f.numpy().tolist()
     mel_f = []
@@ -81,7 +76,6 @@ def F_Mel(fre_f, audio_conf):
             mel_f_frame.append(tmp)
         mel_f.append(mel_f_frame)
     return torch.FloatTensor(mel_f)
-
 
 def process_kaldi_feat(feat_file, feat_size):
     '''
@@ -163,12 +157,10 @@ if __name__ == '__main__':
             'bartlett':scipy.signal.bartlett}
     audio_conf = {"sample_rate":16000, 'window_size':0.025, 'window_stride':0.01, 'window': 'hamming'} 
     path = '/home/fan/Audio_data/TIMIT/train/dr1/fcjf0/sa1.wav'
-    spect = parse_audio(path, audio_conf, windows, normalize=True)
-    mel_f = parse_audio(path, audio_conf, windows, normalize=False)
-    #mel_f = F_Mel(spect, audio_conf)
+    spect = parse_audio(path, audio_conf, windows, normalize=False)
+    mel_f = F_Mel(spect, audio_conf)
     import visdom
     viz = visdom.Visdom(env='fan')
-    viz.heatmap(spect.transpose(0, 1))
-    viz.heatmap(mel_f.transpose(0, 1))
-    #print(F_Mel(spect, audio_conf))
-    #print(mel_f)
+    viz.heatmap(spect.transpose(0, 1), opts=dict(title="Log Spectrum", xlabel="She had your dark suit in greasy wash water all year.", ylabel="Frequency"))
+    viz.heatmap(mel_f.transpose(0, 1), opts=dict(title="Log Mel Spectrum", xlabel="She had your dark suit in greasy wash water all year.", ylabel="Frequency"))
+    
