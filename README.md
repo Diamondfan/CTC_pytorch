@@ -46,6 +46,8 @@ cd audio
 pip install cffi
 python setup.py install
 ```
+- Install [Kaldi](https://github.com/kaldi-asr/kaldi). We use kaldi to extract mfcc and fbank.
+- Install [KenLM](https://github.com/kpu/kenlm). Training n-gram Languange Model if needed.
 - Install other python packages
 ```
 pip install -r requirements.txt
@@ -56,17 +58,19 @@ python -m visdom.server
 ```
 
 ## Usage
-1. open the top script run.sh and alter the directory of data and config file
-2. open the config file to revise the super-parameters about everything
-3. run the top script with four conditions
+1. Install all the things according to the Install part.  
+2. Open the top script run.sh and alter the directory of data and config file.  
+3. Change the $feats if you want to use fbank or mfcc and revise conf file under the directory conf.  
+4. Open the config file to revise the super-parameters about everything  
+5. Run the top script with four conditions
 ```bash
 bash run.sh    data_prepare + AM training + LM training + testing
 bash run.sh 1  AM training + LM training + testing
 bash run.sh 2  LM training + testing
 bash run.sh 3  testing
 ```
-Data_prepare and LM training are not implemented yet. They are added to the todo-list.
-So only when you prepare the data, run.sh will be worked.
+LM training are not implemented yet. They are added to the todo-list.  
+So only when you prepare the data, run.sh will work.
 
 ## Data Prepare
 1. Extract 39dim mfcc and 40dim fbank feature from kaldi. 
@@ -95,13 +99,12 @@ Optimizer is nn.optimizer.Adam with weigth decay 0.005
 Take the max prob of outputs as the result and get the path.  
 Calculate the WER and CER by used the function of the class.
 ### Beam decoder:
-Implemented by python. [Original Code](https://github.com/githubharald/CTCDecoder)  
+Implemented with python. [Original Code](https://github.com/githubharald/CTCDecoder)  
 I fix it to support phoneme for batch decode.    
 Beamsearch can improve about 0.2% of phonome accuracy.  
 Phoneme-level language model is inserted to beam search decoder now.  
 
 ## ToDo
-- Add data_prepare to the top scripts.
 - Combine with RNN-LM  
 - Beam search with RNN-LM  
 - The code in 863_corpus is a mess. Need arranged.
