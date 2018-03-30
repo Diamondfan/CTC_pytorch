@@ -8,7 +8,7 @@
 
 . path.sh
 
-stage=0
+stage=1
 TIMIT_DIR='/home/fan/Audio_data/TIMIT'
 lm_path='./data_prepare/bigram.arpa'
 CONF_FILE='./conf/ctc_model_setting.conf'
@@ -25,9 +25,9 @@ if [ $stage -le 0 ]; then
     echo "                   Data Preparing                     "
     echo ========================================================
 
-    ./local/timit_data_prep.sh $TIMIT_DIR
+    ./local/timit_data_prep.sh $TIMIT_DIR || exit 1
     
-    ./local/make_feat.sh $feats
+    ./local/make_feat.sh $feats || exit 1
 
 fi
 
@@ -36,7 +36,10 @@ if [ $stage -le 1 ]; then
     echo "                  Acoustic Model                      "
     echo ========================================================
 
-    #python steps/ctc_train.py --conf $CONF_FILE --log-dir $LOG_DIR || exit 1;
+    if ! [ -d $LOG_DIR ]; then
+        mkdir -p $LOG_DIR
+    fi
+    python steps/ctc_train.py --conf $CONF_FILE --log-dir $LOG_DIR || exit 1;
 fi
 
 if [ $stage -le 2 ]; then
@@ -50,6 +53,6 @@ if [ $stage -le 3 ]; then
     echo "                     Decoding                         "
     echo ========================================================
 
-    #python steps/test.py --conf $CONF_FILE --map-48-39 $MAP_FILE --lm-path $lm_path || exit 1;
+    python steps/test.py --conf $CONF_FILE --map-48-39 $MAP_FILE --lm-path $lm_path || exit 1;
 fi
 

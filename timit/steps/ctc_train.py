@@ -236,6 +236,7 @@ def main():
     
     for idx, m in enumerate(model.children()):
         print(idx, m)
+        logger.info(str(idx) + "->" + str(m))
     
     dataset = cf.get('Data', 'dataset')
     data_dir = cf.get('Data', 'data_dir')
@@ -259,7 +260,7 @@ def main():
         dev_loader = SpeechDataLoader(dev_dataset, batch_size=batch_size, shuffle=False,
                                             num_workers=4, pin_memory=False)
     #decoder for dev set
-    decoder = GreedyDecoder(dev_dataset.int2phone, space_idx=-1, blank_index=0)
+    decoder = GreedyDecoder(dev_dataset.int2class, space_idx=-1, blank_index=0)
         
     #Training
     init_lr = cf.getfloat('Training', 'init_lr')

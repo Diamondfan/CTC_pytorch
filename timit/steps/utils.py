@@ -7,7 +7,6 @@ import math
 import torch
 import librosa
 import torchaudio
-import numpy as np
 
 def load_audio(path):
     '''
@@ -101,12 +100,12 @@ def process_kaldi_feat(feat_file, feat_size):
     f.close()
     return feat_dict
 
-def process_label_file(label_file, label_type, char_map):
+def process_label_file(label_file, label_type, class2int):
     '''
     Input:
         label_file  : string  标签文件路径
         label_type  : string  标签类型(目前只支持字符和音素)
-        char_map    : dict    标签和数字的对应关系
+        class2int   : dict    标签和数字的对应关系
     Output:
         label_dict  : dict    所有句子的标签，每个句子是numpy类型
     '''
@@ -119,16 +118,16 @@ def process_label_file(label_file, label_type, char_map):
             utt = label.split('\t', 1)[0]
             label = label.split('\t', 1)[1]
             for i in range(len(label)):
-                if label[i].lower() in char_map:
-                    label_list.append(char_map[label[i].lower()])
+                if label[i].lower() in class2int:
+                    label_list.append(class2int[label[i].lower()])
                 if label[i] == ' ':
-                    label_list.append(28)
+                    label_list.append(class2int['SPACE'])
         else:
             label = label.split()
             utt = label[0]
             for i in range(1,len(label)):
-                label_list.append(char_map[label[i]])
-        label_dict[utt] = np.array(label_list)
+                label_list.append(class2int[label[i]])
+        label_dict[utt] = label_list
     f.close()
     return label_dict
 
@@ -137,19 +136,19 @@ def process_map_file(map_file):
     Input:
         map_file  : string label和数字的对应关系文件
     Output:
-        char_map  : dict  对应关系字典
-        int2phone : dict  数字到label的对应关系
+        class2int  : dict  label到数字的对应关系
+        int2class  : dict  数字到label的对应关系
     '''
-    char_map = dict()
-    int2phone = dict()
+    class2int = dict()
+    int2class = dict()
     f = open(map_file, 'r')
     for line in f.readlines():
-        char, num = line.strip().split(' ')
-        char_map[char] = int(num)
-        int2phone[int(num)] = char
+        label, num = line.strip().split(' ')
+        class2int[label] = int(num)
+        int2class[int(num)] = label
     f.close()
-    int2phone[0] = '#'
-    return char_map, int2phone
+    int2class[0] = '#'
+    return class2int, int2class
 
 if __name__ == '__main__':
     import scipy.signal
@@ -159,6 +158,7 @@ if __name__ == '__main__':
     path = '/home/fan/Audio_data/TIMIT/train/dr1/fcjf0/sa1.wav'
     spect = parse_audio(path, audio_conf, windows, normalize=False)
     mel_f = F_Mel(spect, audio_conf)
+    
     import visdom
     viz = visdom.Visdom(env='fan')
     viz.heatmap(spect.transpose(0, 1), opts=dict(title="Log Spectrum", xlabel="She had your dark suit in greasy wash water all year.", ylabel="Frequency"))

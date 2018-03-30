@@ -67,9 +67,9 @@ def test():
         model = model.cuda()
 
     if decoder_type == 'Greedy':
-        decoder  = GreedyDecoder(test_dataset.int2phone, space_idx=-1, blank_index=0)
+        decoder  = GreedyDecoder(test_dataset.int2class, space_idx=-1, blank_index=0)
     else:
-        decoder = BeamDecoder(test_dataset.int2phone, beam_width=beam_width, blank_index=0, space_idx=-1, lm_path=args.lm_path, lm_alpha=lm_alpha)    
+        decoder = BeamDecoder(test_dataset.int2class, beam_width=beam_width, blank_index=0, space_idx=-1, lm_path=args.lm_path, lm_alpha=lm_alpha)    
     
     if args.map_48_39 is not None:
         import pickle
