@@ -3,6 +3,7 @@
 #Author: Richardfan
 #2017.11.1    Training acoustic model and decode with phoneme-level bigram
 #2018.3.16    Add RNNLM and decode with RNNLM
+#2018.4.30    Replace the h5py with ark and simplify the data_loader.py
 
 #Top script of one entire experiment
 
@@ -10,11 +11,11 @@
 
 stage=1
 TIMIT_DIR='/home/fan/Audio_data/TIMIT'
-lm_path='./data_prepare/bigram.arpa'
+lm_path='./data_prepare/LM/bigram.arpa'
 CONF_FILE='./conf/ctc_model_setting.conf'
 LOG_DIR='./log/'
 MAP_FILE='./decode_map_48-39/map_dict.pkl'
-feats='Fbank'
+feats='Spect'                          #Fbank, MFCC, Spect
 
 if [ ! -z $1 ]; then
     stage=$1

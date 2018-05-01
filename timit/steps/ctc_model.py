@@ -80,11 +80,20 @@ class LayerCNN(nn.Module):
     def __init__(self, in_channel, out_channel, kernel_size, stride, padding, pooling_size=None, 
                         activation_function=nn.ReLU, batch_norm=True):
         super(LayerCNN, self).__init__()
-        self.conv = nn.Conv2d(in_channel, out_channel, kernel_size=kernel_size, stride=stride, padding=padding)
-        self.batch_norm = nn.BatchNorm2d(out_channel) if batch_norm else None
+        try:
+            if len(kernel_size) == 2:
+                self.conv = nn.Conv2d(in_channel, out_channel, kernel_size=kernel_size, stride=stride, padding=padding)
+                self.batch_norm = nn.BatchNorm2d(out_channel) if batch_norm else None
+        except:
+            self.conv = nn.Conv1d(in_channel, out_channel, kernel_size=kernel_size, stride=stride, padding=padding)
+            self.batch_norm = nn.BatchNorm1d(out_channel) if batch_norm else None
         self.activation = activation_function(inplace=True)
         if pooling_size is not None:
-            self.pooling = nn.MaxPool2d(pooling_size)
+            try:
+                if len(kernel_size) == 2:
+                    self.pooling = nn.MaxPool2d(pooling_size)
+            except:
+                self.pooling = nn.MaxPool1d(pooling_size)
         else:
             self.pooling = None
         
@@ -137,8 +146,10 @@ class CTC_Model(nn.Module):
                                 activation_function=activation, batch_norm=batch_norm)
                 cnns.append(('%d' % layer, cnn))
                
-                rnn_input_size = int(math.floor((rnn_input_size+2*padding[1]-kernel_size[1])/stride[1])+1)
-            
+                try:
+                    rnn_input_size = int(math.floor((rnn_input_size+2*padding[1]-kernel_size[1])/stride[1])+1)
+                except:
+                    rnn_input_size = rnn_input_size
             self.conv = nn.Sequential(OrderedDict(cnns))
             #change the input of rnn, adjust the feature length and adjust the seq_len in dataloader
             rnn_input_size *= out_channel
@@ -178,19 +189,20 @@ class CTC_Model(nn.Module):
         #x: batch_size * 1 * max_seq_length * feat_size
         if visualize:
             visual = [x]
-
+        
         if self.add_cnn:
             x = self.conv(x)
             
             if visualize:
                 visual.append(x)
             
-            x = x.transpose(2, 3).contiguous()
-            
+            x = x.transpose(1, 2).contiguous()
             sizes = x.size()
-            x = x.view(sizes[0], sizes[1]*sizes[2], sizes[3])
-            x = x.transpose(1,2).transpose(0,1).contiguous()
+            if len(sizes) > 3:
+                x = x.view(sizes[0], sizes[1], sizes[2]*sizes[3])
             
+            x = x.transpose(0,1).contiguous()
+
             if visualize:
                 visual.append(x)
 

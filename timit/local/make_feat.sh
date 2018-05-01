@@ -20,13 +20,15 @@ if [ "$feat_type" == "Fbank" ]; then
         if [ $x == train ]; then
             compute-cmvn-stats --binary=false scp:$data_dir/$x/raw_fbank.scp $data_dir/global_fbank_cmvn.txt
         fi
-        apply-cmvn --norm-vars=true $data_dir/global_fbank_cmvn.txt scp:$data_dir/$x/raw_fbank.scp ark,t:$data_dir/$x/fbank.txt
+        apply-cmvn --norm-vars=true $data_dir/global_fbank_cmvn.txt scp:$data_dir/$x/raw_fbank.scp \
+            ark,scp:$data_dir/$x/fbank.ark,$data_dir/$x/fbank.scp
+        rm -f $data_dir/$x/raw_fbank.ark $data_dir/$x/raw_fbank.scp
     done
 fi
 
 if [ "$feat_type" == 'MFCC' ]; then
 	echo ============================================================================
-	echo "                    MFCC Feature Extration & CMVN                         "
+	echo "                    MFCC Feature Extraction & CMVN                        "
 	echo ============================================================================
 
 	mfcc_config=./conf/mfcc.conf
@@ -37,9 +39,22 @@ if [ "$feat_type" == 'MFCC' ]; then
         if [ $x == train ]; then
             compute-cmvn-stats --binary=false scp:$data_dir/$x/raw_mfcc.scp $data_dir/global_mfcc_cmvn.txt
         fi
-        apply-cmvn --norm-vars=true $data_dir/global_mfcc_cmvn.txt scp:$data_dir/$x/raw_mfcc.scp ark:- | add-deltas ark:- ark,t:$data_dir/$x/mfcc.txt
+        apply-cmvn --norm-vars=true $data_dir/global_mfcc_cmvn.txt scp:$data_dir/$x/raw_mfcc.scp ark:- | add-deltas ark:- \
+            ark,scp:$data_dir/$x/mfcc.ark,$data_dir/$x/mfcc.scp
+        rm -f $data_dir/$x/raw_mfcc.ark $data_dir/$x/raw_mfcc.scp
     done
 fi	
+
+if [ "$feat_type" == "Spect" ]; then
+    echo ============================================================================
+    echo "                     Spectrum Feature Extraction                          "
+    echo ============================================================================
+    
+    for x in train dev test; do
+        echo "$x dataset:"
+        python ./local/make_spectrum.py $data_dir/$x/wav.scp $data_dir/$x/spectrum.ark $data_dir/$x/spectrum.scp
+    done
+fi
 
 echo "Finished successfully on" `date`
 exit 0

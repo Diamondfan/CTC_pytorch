@@ -9,12 +9,12 @@ import librosa
 import torchaudio
 
 def load_audio(path):
-    '''
-    Input:
+    """
+    Args:
         path     : string 载入音频的路径
-    Output:
+    Returns:
         sound    : numpy.ndarray 单声道音频数据，如果是多声道进行平均
-    '''
+    """
     sound, _ = torchaudio.load(path)
     sound = sound.numpy()
     if len(sound.shape) > 1:
@@ -23,6 +23,28 @@ def load_audio(path):
         else:
             sound = sound.mean(axis=1)
     return sound
+
+def load_wave(path, normalize=True):
+    """
+    Args:
+        path     : string 载入音频的路径
+    Returns:
+    """
+    sound, _ = torchaudio.load(path)
+    sound = sound.numpy()
+    if len(sound.shape) > 1:
+        if sound.shape[1] == 1:
+            sound = sound.squeeze()
+        else:
+            sound = sound.mean(axis=1)
+    
+    wave = torch.FloatTensor(sound)
+    if normalize:
+        mean = wave.mean()
+        std = wave.std()
+        wave.add_(-mean)
+        wave.div_(std)
+    return wave
 
 def parse_audio(path, audio_conf, windows, normalize=False):
     '''
@@ -155,12 +177,14 @@ if __name__ == '__main__':
     windows = {'hamming':scipy.signal.hamming, 'hann':scipy.signal.hann, 'blackman':scipy.signal.blackman,
             'bartlett':scipy.signal.bartlett}
     audio_conf = {"sample_rate":16000, 'window_size':0.025, 'window_stride':0.01, 'window': 'hamming'} 
-    path = '/home/fan/Audio_data/TIMIT/train/dr1/fcjf0/sa1.wav'
-    spect = parse_audio(path, audio_conf, windows, normalize=False)
+    path = '/home/fan/Audio_data/TIMIT/test/dr7/fdhc0/si1559.wav'
+    spect = parse_audio(path, audio_conf, windows, normalize=True)
     mel_f = F_Mel(spect, audio_conf)
-    
+    wave = load_wav(path)
+    print(wave)
+
     import visdom
     viz = visdom.Visdom(env='fan')
     viz.heatmap(spect.transpose(0, 1), opts=dict(title="Log Spectrum", xlabel="She had your dark suit in greasy wash water all year.", ylabel="Frequency"))
     viz.heatmap(mel_f.transpose(0, 1), opts=dict(title="Log Mel Spectrum", xlabel="She had your dark suit in greasy wash water all year.", ylabel="Frequency"))
-    
+    viz.line(wave.numpy())

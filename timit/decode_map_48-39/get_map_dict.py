@@ -12,6 +12,7 @@ for line in map_file.readlines():
         map_dict[line[1]] = line[2]
 map_file.close()
 
+#map_dict['q'] = ''
 print(map_dict)
 f = open('./map_dict.pkl', 'wb')
 pickle.dump(map_dict, f)

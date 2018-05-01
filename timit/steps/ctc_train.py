@@ -249,6 +249,7 @@ def main():
     #Data Loader
     train_dataset = SpeechDataset(data_dir, data_set='train', feature_type=feature_type, out_type=out_type, n_feats=n_feats, mel=mel)
     dev_dataset = SpeechDataset(data_dir, data_set="dev", feature_type=feature_type, out_type=out_type, n_feats=n_feats, mel=mel)
+    
     if add_cnn:
         train_loader = SpeechCNNDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                                             num_workers=4, pin_memory=False)
@@ -320,9 +321,9 @@ def main():
         print("Start training epoch: %d, learning_rate: %.5f" % (count, learning_rate))
         logger.info("Start training epoch: %d, learning_rate: %.5f" % (count, learning_rate))
         
-        loss = train(model, train_loader, loss_fn, optimizer, logger, add_cnn=add_cnn, print_every=20)
+        loss = train(model, train_loader, loss_fn, optimizer, logger, add_cnn=add_cnn, print_every=20, USE_CUDA=USE_CUDA)
         loss_results.append(loss)
-        acc, dev_loss = dev(model, dev_loader, loss_fn, decoder, logger, add_cnn=add_cnn)
+        acc, dev_loss = dev(model, dev_loader, loss_fn, decoder, logger, add_cnn=add_cnn, USE_CUDA=USE_CUDA)
         print("loss on dev set is %.4f" % dev_loss)
         logger.info("loss on dev set is %.4f" % dev_loss)
         dev_loss_results.append(dev_loss)

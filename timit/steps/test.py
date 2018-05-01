@@ -125,10 +125,10 @@ def test():
             decoder.num_char += len(labels[x])
         total_cer += cer
         total_wer += wer
-    CER = (1 - float(total_cer) / decoder.num_char)*100
-    WER = (1 - float(total_wer) / decoder.num_word)*100
-    print("Character error rate on test set: %.4f" % CER)
-    print("Word error rate on test set: %.4f" % WER)
+    CER = (float(total_cer) / decoder.num_char)*100
+    WER = (float(total_wer) / decoder.num_word)*100
+    print("Character error rate on %s set: %.4f" % (data_set, CER))
+    print("Word error rate on %s set: %.4f" % (data_set, WER))
     end = time.time()
     time_used = (end - start) / 60.0
     print("time used for decode %d sentences: %.4f minutes." % (len(test_dataset), time_used))

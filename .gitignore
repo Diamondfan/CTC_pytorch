@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+
+my_863_corpus/*
+log/
