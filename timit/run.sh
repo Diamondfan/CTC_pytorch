@@ -1,59 +1,47 @@
 #!/bin/bash
 
-#Author: Richardfan
-#2017.11.1    Training acoustic model and decode with phoneme-level bigram
-#2018.3.16    Add RNNLM and decode with RNNLM
-#2018.4.30    Replace the h5py with ark and simplify the data_loader.py
-
-#Top script of one entire experiment
+#Author: Ruchao Fan
+#2017.11.1     Training acoustic model and decode with phoneme-level bigram
+#2018.4.30     Replace the h5py with ark and simplify the data_loader.py
+#2019.12.20    Update to pytorch1.2 and python3.7
 
 . path.sh
 
-stage=1
-TIMIT_DIR='/home/fan/Audio_data/TIMIT'
-lm_path='./data_prepare/LM/bigram.arpa'
-CONF_FILE='./conf/ctc_model_setting.conf'
-LOG_DIR='./log/'
-MAP_FILE='./decode_map_48-39/map_dict.pkl'
-feats='Spect'                          #Fbank, MFCC, Spect
+stage=0
+
+timit_dir=''
+phoneme_map='60-39'
+feat_dir='data'                            #dir to save feature
+feat_type='fbank'                          #fbank, mfcc, spectrogram
+config_file='conf/ctc_config.yaml'
 
 if [ ! -z $1 ]; then
     stage=$1
 fi
 
 if [ $stage -le 0 ]; then
-    echo ========================================================
-    echo "                   Data Preparing                     "
-    echo ========================================================
-
-    ./local/timit_data_prep.sh $TIMIT_DIR || exit 1
-    
-    ./local/make_feat.sh $feats || exit 1
-
+    echo "Step 0: Data Preparation ..."
+    local/timit_data_prep.sh $timit_dir $phoneme_map || exit 1;
+    python3 steps/get_model_units.py $feat_dir/train/phn_text
 fi
 
 if [ $stage -le 1 ]; then
-    echo ========================================================
-    echo "                  Acoustic Model                      "
-    echo ========================================================
-
-    if ! [ -d $LOG_DIR ]; then
-        mkdir -p $LOG_DIR
-    fi
-    python steps/ctc_train.py --conf $CONF_FILE --log-dir $LOG_DIR || exit 1;
+    echo "Step 1: Feature Extraction..."
+    steps/make_feat.sh $feat_type $feat_dir || exit 1;
 fi
 
 if [ $stage -le 2 ]; then
-    echo ========================================================
-    echo "                   RNNLM Model                        "
-    echo ========================================================
+    echo "Step 2: Acoustic Model(CTC) Training..."
+    CUDA_VISIBLE_DEVICE='0' python3 steps/train_ctc.py --conf $config_file || exit 1;
 fi
 
 if [ $stage -le 3 ]; then
-    echo ========================================================
-    echo "                     Decoding                         "
-    echo ========================================================
+    echo "Step 3: LM Model Training..."
+    steps/train_lm.sh $feat_dir || exit 1;
+fi
 
-    python steps/test.py --conf $CONF_FILE --map-48-39 $MAP_FILE --lm-path $lm_path || exit 1;
+if [ $stage -le 4 ]; then
+    echo "Step 4: Decoding..."
+    CUDA_VISIBLE_DEVICE='0' python3 steps/test_ctc.py --conf $config_file || exit 1;
 fi
 

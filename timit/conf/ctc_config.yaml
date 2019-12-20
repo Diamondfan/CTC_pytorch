@@ -1,0 +1,60 @@
+#exp name and save dir
+exp_name: 'ctc_fbank_cnn'
+checkpoint_dir: 'checkpoint/'
+
+#Data
+vocab_file: 'data/units'
+train_scp_path: 'data/train/fbank.scp'
+train_lab_path: 'data/train/phn_text'
+valid_scp_path: 'data/dev/fbank.scp'
+valid_lab_path: 'data/dev/phn_text'
+left_ctx: 0
+right_ctx: 2
+n_skip_frame: 2
+n_downsample: 2
+num_workers: 1
+shuffle_train: True
+feature_dim: 81
+output_class_dim: 39
+mel: False
+feature_type: "fbank"
+
+#Model
+rnn_input_size: 243
+rnn_hidden_size: 384
+rnn_layers: 4
+rnn_type: "nn.LSTM"
+bidirectional: True
+batch_norm: True
+drop_out: 0.2
+
+#CNN
+add_cnn: True
+layers: 2
+channel: "[(1, 32), (32, 32)]"
+kernel_size: "[(3, 3), (3, 3)]"
+stride: "[(1, 2), (2, 2)]"
+padding: "[(1, 1), (1, 1)]"
+pooling: "None"
+batch_norm: True
+activation_function: "relu"
+
+#[Training]
+use_gpu: True
+init_lr: 0.001
+num_epoches: 500
+end_adjust_acc: 2
+lr_decay: 0.5
+batch_size: 8
+weight_decay: 0.0005
+seed: 1
+verbose_step: 50
+
+#[test]
+test_scp_path: 'data/test/fbank.scp'
+test_lab_path: 'data/test/phn_text'
+decode_type: "Greedy"
+beam_width: 10
+lm_alpha: 0.1
+lm_path: 'data/lm_phone_bg.arpa'
+

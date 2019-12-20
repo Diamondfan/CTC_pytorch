@@ -15,26 +15,33 @@ def main():
     if not os.path.exists(args.map) or not os.path.exists(args.src):
         print("Map file or source file not exist !")
         sys.exit(1)
+    
     map_dict = {}
     with open(args.map) as f:
         for line in f.readlines():
             line = line.strip().split('\t')
-            if args.to == "48":
+            if args.to == "60-48":
                 if len(line) == 1:
                     map_dict[line[0]] = ""
                 else:
                     map_dict[line[0]] = line[1]
-            elif args.to == "39": 
+            elif args.to == "60-39": 
+                if len(line) == 1:
+                    map_dict[line[0]] = ""
+                else:
+                    map_dict[line[0]] = line[2]
+            elif args.to == "48-39":
                 if len(line) == 3:
                     map_dict[line[1]] = line[2]
             else:
                 print("%s phonemes are not supported" % args.to)
                 sys.exit(1)
+    
     with open(args.src, 'r') as rf, open(args.tgt, 'w') as wf:
         for line in rf.readlines():
-            uttid, utt = line.strip().split('\t')
-            utt = utt.split(' ')
-            map_utt = [ map_dict[phone] for phone in utt if map_dict[phone] != ""]
+            line = line.strip().split(' ')
+            uttid, utt = line[0], line[1:]
+            map_utt = [ map_dict[phone] for phone in utt if map_dict[phone] != "" ]
             wf.writelines(uttid + ' ' + ' '.join(map_utt) + '\n')
 
 if __name__ == "__main__":

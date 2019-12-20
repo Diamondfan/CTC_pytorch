@@ -3,3 +3,5 @@ __pycache__/
 
 my_863_corpus/*
 log/
+checkpoint/
+data/

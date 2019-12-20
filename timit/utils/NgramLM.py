@@ -1,7 +1,6 @@
 #!/usrbin/python
 #encoding=utf-8
 
-# Author: Richarfan
 # Get n-gram propability from arpa file;
 
 import re
@@ -15,22 +14,22 @@ class LanguageModel:
     is generate from kennlm
     """
     def __init__(self, arpa_file=None, n_gram=2, start='<s>', end='</s>', unk='<unk>'):
-	"Load arpa file to get words and prob"
-	#self.classes = classes
-	self.n_gram = n_gram
-        self.start = start
+        "Load arpa file to get words and prob"
+        self.n_gram = n_gram
+        self.start = start 
         self.end = end
+        self.unk = unk
         self.scale = math.log(10)    #arpa格式是以10为底的对数概率，转化为以e为底
         self.initngrams(arpa_file)
 
     def initngrams(self, fn):
-	"internal init of word bigrams"
-	self.unigram = {}
+        "internal init of word bigrams"
+        self.unigram = {}
         self.bigram = {}
         if self.n_gram == 3:
             self.trigrame = {}
         
-	# go through text and create each bigrams
+	    # go through text and create each bigrams
         f = open(fn, 'r')
         recording = 0
         for lines in f.readlines():
@@ -56,12 +55,11 @@ class LanguageModel:
                 elif len(line) == 2:
                     self.bigram[line[1]] = [self.scale * float(line[0]), 0.0]
         f.close()
+        self.unigram['UNK'] = self.unigram[self.unk]
         
 
     def get_uni_prob(self, wid):
-	'''
-        Returns unigram probabiliy of word
-        '''
+        "Returns unigram probabiliy of word"
         return self.unigram[wid][0]
     
     def get_bi_prob(self, w1, w2):

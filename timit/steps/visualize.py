@@ -1,6 +1,7 @@
 #!/usr/bin/python
 #encoding=utf-8
 
+#old version, need updated
 from data_loader import myDataset
 from data_loader import myDataLoader, myCNNDataLoader
 from model import *

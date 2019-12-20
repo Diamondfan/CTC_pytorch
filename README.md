@@ -1,9 +1,12 @@
-# End-to-End Automatic Speech recogniton
-This is an END-To-END system for speech recognition based on CTC implemented with pytorch.  
+## Update:
+Update to pytorch1.2 and python3.
+
+# CTC-based Automatic Speech Recogniton
+This is a CTC-based speech recognition system with pytorch.
 
 At present, the system only supports phoneme recognition.  
 
-You can also do it at word-level, but you may get a high error rate.
+You can also do it at word-level and may get a high error rate.
 
 Another way is to decode with a lexcion and word-level language model using WFST which is not included in this system.
 
@@ -36,32 +39,27 @@ Chinese Corpus: 863 Corpus
 
 ## Install
 - Install [Pytorch](http://pytorch.org/)
-- Install [warp-ctc](https://github.com/SeanNaren/warp-ctc) and bind it to pytorch.  
-	Notice: If use python2, reinstall the pytorch with source code instead of pip.  
-- Install pytorch audio:
-```bash 
-sudo apt-get install sox libsox-dev libsox-fmt-all
-git clone https://github.com/pytorch/audio.git
-cd audio
-pip install cffi
-python setup.py install
-```
+- ~~Install [warp-ctc](https://github.com/SeanNaren/warp-ctc) and bind it to pytorch.~~  
+    ~~Notice: If use python2, reinstall the pytorch with source code instead of pip.~~
+    Use pytorch1.2 built-in CTC function(nn.CTCLoss) Now.
 - Install [Kaldi](https://github.com/kaldi-asr/kaldi). We use kaldi to extract mfcc and fbank.
-- Install [KenLM](https://github.com/kpu/kenlm). Training n-gram Languange Model if needed.
+- Install pytorch [torchaudio](https://github.com/pytorch/audio.git)(This is needed when using waveform as input).
+- ~~Install [KenLM](https://github.com/kpu/kenlm). Training n-gram Languange Model if needed~~.
+    Use Irstlm in kaldi tools instead.
+- Install and start visdom
+```
+pip3 install visdom
+python -m visdom.server
+```
 - Install other python packages
 ```
 pip install -r requirements.txt
 ```
-- Start visdom
-```
-python -m visdom.server
-```
 
 ## Usage
-1. Install all the things according to the Install part.  
-2. Open the top script run.sh and alter the directory of data and config file.  
-3. Change the $feats if you want to use fbank or mfcc and revise conf file under the directory conf.  
-4. Open the config file to revise the super-parameters about everything  
+1. Install all the packages according to the Install part.  
+2. Revise the top script run.sh.  
+4. Open the config file to revise the super-parameters about everything.  
 5. Run the top script with four conditions
 ```bash
 bash run.sh    data_prepare + AM training + LM training + testing
@@ -69,8 +67,7 @@ bash run.sh 1  AM training + LM training + testing
 bash run.sh 2  LM training + testing
 bash run.sh 3  testing
 ```
-LM training are not implemented yet. They are added to the todo-list.  
-So only when you prepare the data, run.sh will work.
+RNN LM training is not implemented yet. They are added to the todo-list.  
 
 ## Data Prepare
 1. Extract 39dim mfcc and 40dim fbank feature from kaldi. 
@@ -81,9 +78,9 @@ So only when you prepare the data, run.sh will work.
 - RNN + DNN + CTC 
     RNN here can be replaced by nn.LSTM and nn.GRU
 - CNN + RNN + DNN + CTC  
-	CNN is use to reduce the variety of spectrum which can be caused by the speaker and environment difference.
+    CNN is use to reduce the variety of spectrum which can be caused by the speaker and environment difference.
 - How to choose  
-	Use add_cnn to choose one of two models. If add_cnn is True, then CNN+RNN+DNN+CTC will be chosen.
+    Use add_cnn to choose one of two models. If add_cnn is True, then CNN+RNN+DNN+CTC will be chosen.
 
 ## Training:
 - initial-lr = 0.001
@@ -91,7 +88,7 @@ So only when you prepare the data, run.sh will work.
 - wight-decay = 0.005   
 
 Adjust the learning rate if the dev loss is around a specific loss for ten times.  
-Times of adjusting learning rate is 8 which can be alter in steps/ctc_train.py(line367).  
+Times of adjusting learning rate is 8 which can be alter in steps/train_ctc.py(line367).  
 Optimizer is nn.optimizer.Adam with weigth decay 0.005 
 
 ## Decoder
@@ -108,3 +105,4 @@ Phoneme-level language model is inserted to beam search decoder now.
 - Combine with RNN-LM  
 - Beam search with RNN-LM  
 - The code in 863_corpus is a mess. Need arranged.
+

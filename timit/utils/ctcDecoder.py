@@ -162,9 +162,8 @@ class GreedyDecoder(Decoder):
         prob_tensor = prob_tensor.transpose(0,1)
         _, decoded = torch.max(prob_tensor, 2)
         decoded = decoded.view(decoded.size(0), decoded.size(1))
-        decoded = self._convert_to_strings(decoded, frame_seq_len)
+        decoded = self._convert_to_strings(decoded.numpy(), frame_seq_len)
         return self._process_strings(decoded, remove_rep=True)
-
 
 class BeamDecoder(Decoder):
     "Beam search 解码。解码结果为整个序列概率的最大值"
@@ -172,10 +171,12 @@ class BeamDecoder(Decoder):
         self.beam_width = beam_width
         super(BeamDecoder, self).__init__(int2char, space_idx=space_idx, blank_index=blank_index)
 
-        import BeamSearch
-        import NgramLM
-        lm = NgramLM.LanguageModel(arpa_file=lm_path)
-        self._decoder = BeamSearch.ctcBeamSearch(int2char, beam_width, lm, lm_alpha=lm_alpha, blank_index = blank_index)
+        import sys
+        sys.path.append('../')
+        import utils.BeamSearch as uBeam
+        import utils.NgramLM as uNgram
+        lm = uNgram.LanguageModel(arpa_file=lm_path)
+        self._decoder = uBeam.ctcBeamSearch(int2char, beam_width, lm, lm_alpha=lm_alpha, blank_index = blank_index)
 
     def decode(self, prob_tensor, frame_seq_len=None):
         '''解码函数
@@ -186,8 +187,10 @@ class BeamDecoder(Decoder):
             res           :   解码得到的string，即识别结果
         '''
         probs = prob_tensor.transpose(0, 1)
+        probs = torch.exp(probs)
         res = self._decoder.decode(probs, frame_seq_len)
         return res
+
 
 if __name__ == '__main__':
     decoder = Decoder('abcde', 1, 2)
